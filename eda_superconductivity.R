@@ -169,6 +169,18 @@ grid.arrange(grobs = scatter_plots, ncol = 4)
 outlier_top20 <- outlier_counts[names(outlier_counts) %in% top20]
 print(sort(outlier_top20, decreasing = TRUE))
 
-# ESTE CO TREBA DOPLNIT
-#1. Skewness/Kurtosis ?? 
-# ESte nieco ????
+
+# Skewness function 
+calculate_skewness <- function(x) {
+  x <- x[is.finite(x)]
+  n <- length(x)
+  m <- mean(x)
+  s <- sd(x)
+  sum((x - m)^3) / n / (s^3)
+}
+
+raw_skew <- calculate_skewness(data$critical_temp)
+log1p_skew <- calculate_skewness(log1p(data$critical_temp))
+
+cat("Skewness of raw critical_temp:", round(raw_skew, 4), "\n")
+cat("Skewness of log1p(critical_temp):", round(log1p_skew, 4), "\n")
