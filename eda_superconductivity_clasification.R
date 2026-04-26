@@ -3,6 +3,13 @@ library(ggplot2)
 library(patchwork)
 library(magrittr)
 library(pheatmap)
+library(MASS)         # lda() / qda()
+library(randomForest) # randomForest()
+library(pROC)         # roc(), auc()
+library(broom)        # tidy()
+library(ggrepel)
+
+select <- dplyr::select   # prevent MASS::select from masking dplyr::select
 
 # Load the dataset
 data <- read_csv("train.csv")
@@ -263,3 +270,241 @@ outlier_counts <- data %>%
   arrange(desc(outlier_count))
 
 outlier_counts
+
+
+# =============================================================================
+# TASK 1 — MODELS: Three Methods × Two Feature-Space Partitioning Families
+#
+# Family A — Linear hyperplane:  (1) Logistic Regression  (2) QDA
+# Family B — Recursive binary:   (3) Random Forest
+#
+# Family A methods use top-20 features (from feature_ranking above).
+# Family B uses all 81 numeric predictors.
+# =============================================================================
+
+set.seed(42)
+
+# top-20 features for linear methods (reuse feature_ranking from EDA)
+top20 <- feature_ranking %>% slice_head(n = 20) %>% pull(feature)
+
+# ── STRATIFIED TRAIN / TEST SPLIT (80 / 20) ───────────────────────────────────
+
+data_split <- data %>% mutate(row_id = row_number())
+
+train_df <- data_split %>%
+  group_by(tc_class) %>%
+  slice_sample(prop = 0.8) %>%
+  ungroup()
+
+test_df <- data_split %>% anti_join(train_df, by = "row_id")
+
+y_train <- train_df$tc_class
+y_test  <- test_df$tc_class
+
+cat("Train:", nrow(train_df), "| Test:", nrow(test_df), "\n")
+cat("Train class balance:\n"); print(count(train_df, tc_class))
+cat("Test class balance:\n");  print(count(test_df,  tc_class))
+
+# ── MODEL 1: LOGISTIC REGRESSION — linear hyperplane ──────────────────────────
+
+fit_lr <- glm(
+  tc_class ~ .,
+  data   = bind_cols(train_df %>% select(all_of(top20)), tc_class = y_train),
+  family = binomial(link = "logit")
+)
+cat("\nLogistic Regression converged:", fit_lr$converged, "\n")
+
+prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20)), type = "response")
+class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"),
+                   levels = levels(y_train))
+
+# ── MODEL 2: QDA — quadratic discriminant analysis (linear hyperplane family) ─
+# QDA relaxes LDA's equal-covariance assumption: each class gets its own
+# covariance matrix, yielding a quadratic decision boundary.
+
+fit_qda  <- qda(x = as.matrix(train_df %>% select(all_of(top20))), grouping = y_train)
+pred_qda  <- predict(fit_qda, newdata = as.matrix(test_df %>% select(all_of(top20))))
+class_qda <- pred_qda$class
+prob_qda  <- pred_qda$posterior[, "high_tc"]
+
+cat("QDA prior probabilities:", round(fit_qda$prior, 3), "\n")
+
+# ── MODEL 3: RANDOM FOREST — recursive binary partitioning ────────────────────
+
+fit_rf <- randomForest(
+  tc_class ~ .,
+  data       = bind_cols(train_df %>% select(all_of(numeric_predictors)),
+                         tc_class = y_train),
+  ntree      = 500,
+  mtry       = floor(sqrt(length(numeric_predictors))),
+  importance = TRUE
+)
+
+class_rf <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predictors)))
+prob_rf  <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predictors)),
+                    type = "prob")[, "high_tc"]
+
+# OOB sampling is used so OOB error is an unbiased estimate of
+# test error without needing a separate validation set.
+cat("RF OOB error:", round(fit_rf$err.rate[500, "OOB"], 4), "\n")
+
+# ── PERFORMANCE METRICS ───────────────────────────────────────────────────────
+
+compute_metrics <- function(pred_class, pred_prob, truth, label, partition) {
+  cm <- tibble(pred = pred_class, truth = truth) %>%
+    summarise(
+      tp = sum(pred == "high_tc"     & truth == "high_tc"),
+      tn = sum(pred == "non_high_tc" & truth == "non_high_tc"),
+      fp = sum(pred == "high_tc"     & truth == "non_high_tc"),
+      fn = sum(pred == "non_high_tc" & truth == "high_tc")
+    )
+  precision   <- cm$tp / (cm$tp + cm$fp)
+  sensitivity <- cm$tp / (cm$tp + cm$fn)
+  tibble(
+    Method       = label,
+    Partitioning = partition,
+    Accuracy     = round((cm$tp + cm$tn) / (cm$tp + cm$tn + cm$fp + cm$fn), 4),
+    Sensitivity  = round(sensitivity, 4),
+    Specificity  = round(cm$tn / (cm$tn + cm$fp), 4),
+    F1           = round(2 * precision * sensitivity / (precision + sensitivity), 4),
+    AUC          = round(as.numeric(auc(
+      roc(truth, pred_prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+    )), 4)
+  )
+}
+
+perf_table <- bind_rows(
+  compute_metrics(class_lr,  prob_lr,  y_test, "Logistic Regression", "Linear hyperplane"),
+  compute_metrics(class_qda, prob_qda, y_test, "QDA",                 "Linear hyperplane"),
+  compute_metrics(class_rf,  prob_rf,  y_test, "Random Forest",       "Recursive binary")
+)
+
+cat("\n=== PERFORMANCE TABLE ===\n")
+print(perf_table, width = 120)
+
+# ── CONFUSION MATRICES ────────────────────────────────────────────────────────
+
+show_cm <- function(pred_class, truth, label) {
+  cat(sprintf("\n── %s ──\n", label))
+  tibble(Predicted = pred_class, Actual = truth) %>%
+    count(Predicted, Actual) %>%
+    pivot_wider(names_from = Actual, values_from = n, values_fill = 0L) %>%
+    print()
+}
+
+show_cm(class_lr,  y_test, "Logistic Regression")
+show_cm(class_qda, y_test, "QDA")
+show_cm(class_rf,  y_test, "Random Forest")
+
+# ── ROC CURVES ────────────────────────────────────────────────────────────────
+
+roc_to_df <- function(pred_prob, truth, label) {
+  r <- roc(truth, pred_prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+  tibble(FPR    = 1 - r$specificities,
+         TPR    = r$sensitivities,
+         Method = sprintf("%s  (AUC = %.3f)", label, as.numeric(auc(r))))
+}
+
+p_roc <- bind_rows(
+  roc_to_df(prob_lr,  y_test, "Logistic Regression"),
+  roc_to_df(prob_qda, y_test, "QDA"),
+  roc_to_df(prob_rf,  y_test, "Random Forest")
+) %>%
+  ggplot(aes(x = FPR, y = TPR, color = Method)) +
+  geom_line(linewidth = 1.1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey55") +
+  scale_color_manual(values = c("#E41A1C", "#984EA3", "#4DAF4A")) +
+  labs(title    = "ROC curves — three classifiers",
+       subtitle = "Linear hyperplane (LR, QDA) vs Recursive binary (RF)",
+       x = "False Positive Rate", y = "True Positive Rate") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+p_roc
+
+# =============================================================================
+# RESULTS SUMMARY (threshold = 0.5, test set)
+#
+# Method               Partitioning       Accuracy  Sensitivity  Specificity  F1     AUC
+# Logistic Regression  Linear hyperplane  0.870     0.636        0.924        0.646  0.928
+# QDA                  Linear hyperplane  0.776     0.957        0.734        0.614  0.909
+# Random Forest        Recursive binary   0.948     0.847        0.971        0.858  0.980
+#
+# Key observations:
+# - RF is the best overall (highest accuracy, F1, AUC, specificity),
+#   with strong sensitivity (0.847) — misses ~15% of true high_tc cases, but
+#   produces very few false alarms on non_high_tc (specificity 0.971).
+#
+# - QDA has the highest sensitivity (0.957) — misses only 4.3% of true high_tc cases, but
+#   produces many false alarms on non_high_tc as we can see on the low specificity 0.734.
+#
+# - LR has the highest specificity among Family A (0.924) but low sensitivity
+#   (0.636) — misses over a third of true high_tc materials at the 0.5 threshold.
+#
+# - LR and QDA use the same 20 features yet have opposite sensitivity/specificity
+#   profiles because the 0.5 threshold is too high for LR given the class imbalance
+#   (~76% non_high_tc), pushing predictions toward the majority class.
+#
+
+
+
+
+
+# SUGGESTED NEXT STEPS:
+# 1. Youden index threshold — replace the fixed 0.5 cutoff with the threshold that
+#    maximises (sensitivity + specificity - 1) on the ROC curve. This is the lecture-
+#    recommended approach and would likely close the sensitivity gap for LR.
+#    coords(roc_obj, "best", best.method = "youden") from pROC does this in one line.
+#
+# 2. Cross-validation — the current single 80/20 split gives one estimate of
+#    performance. k-fold CV (e.g. k=5 or k=10) would give a more stable estimate
+#    with confidence intervals, especially important for QDA which showed volatile
+#    sensitivity/specificity.
+#
+# 3. RF variable importance plot — importance=TRUE was set during training, so
+#    varImpPlot(fit_rf) can show which of the 81 features drive RF's predictions.
+#    Useful for comparing against the top-20 selected for LR/QDA.
+# =============================================================================
+
+
+# =============================================================================
+# TASK 3 — FEATURE SELECTION: Algorithmic + Embedded Methods
+#
+# Goal: compare one algorithmic and two embedded selection methods on the same
+# classification task, report features retained and significance changes.
+#
+# ALGORITHMIC — Stepwise selection (forward / backward / mixed):
+#   Use stepAIC() from MASS (already loaded) on a logistic regression fit.
+#   direction = "forward"  starts with intercept only, adds features one by one
+#   direction = "backward" starts with all features, removes the least useful
+#   direction = "both"     mixed — recommended, combines both directions
+#   Example:
+#     fit_step <- stepAIC(
+#       glm(tc_class ~ ., data = train_top20, family = binomial),
+#       direction = "both", trace = FALSE
+#     )
+#     summary(fit_step)  # see which features remain and their p-values
+#
+# EMBEDDED METHOD 1 — Lasso (alpha = 1):
+#   Lasso adds an L1 penalty that shrinks some coefficients exactly to zero,
+#   effectively performing feature selection. Requires glmnet package.
+#     library(glmnet)
+#     x_train <- as.matrix(train_df %>% select(all_of(numeric_predictors)))
+#     y_train_bin <- as.numeric(y_train == "high_tc")
+#     cv_lasso <- cv.glmnet(x_train, y_train_bin, family = "binomial", alpha = 1)
+#     coef(cv_lasso, s = "lambda.min")  # non-zero coefficients = retained features
+#
+# EMBEDDED METHOD 2 — Elastic Net (0 < alpha < 1, e.g. alpha = 0.5):
+#   Combines L1 (lasso) and L2 (ridge) penalties. Ridge alone (alpha = 0) shrinks
+#   but never zeros out coefficients so it does not select features — elastic net
+#   is the better second embedded method to pair with lasso.
+#     cv_enet <- cv.glmnet(x_train, y_train_bin, family = "binomial", alpha = 0.5)
+#     coef(cv_enet, s = "lambda.min")
+#
+# REPORTING:
+#   - Count non-zero coefficients in lasso / elastic net at lambda.min and lambda.1se
+#   - Compare retained feature sets across stepwise, lasso, and elastic net
+#   - Note which features appear in all three (most stable) vs only one (fragile)
+#   - Check if features that were significant in LR (Task 1) lose significance
+#     when other predictors are added / removed during stepwise search
+# =============================================================================
