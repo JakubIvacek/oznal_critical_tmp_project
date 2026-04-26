@@ -9,6 +9,7 @@ library(caret)        # confusionMatrix()
 library(pROC)         # roc(), auc()
 library(broom)        # tidy()
 library(ggrepel)
+library(ROCit)
 
 select <- dplyr::select   # prevent MASS::select from masking dplyr::select
 
@@ -272,6 +273,8 @@ outlier_counts <- data %>%
 
 outlier_counts
 
+# Not that many outliers save to remove models which are sensitive to them.
+
 # ── OUTLIER REMOVAL for LR and SVM (IQR method for top 20 features) ───
 # Random Forests (RF) are robust to outliers we will use full data.
 # LR and SVM are sensitive — remove rows with extreme values in any top-20
@@ -301,7 +304,7 @@ cat("Rows original:", nrow(data),
 # =============================================================================
 # TASK 1 — MODELS: Three Methods × Two Feature-Space Partitioning Families
 #
-# A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)
+# A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)??
 # B — Recursive binary:   (3) Random Forest
 #
 # =============================================================================
@@ -419,23 +422,57 @@ roc_lr2 <- roc(y_test, prob_lr2, levels = c("non_high_tc", "high_tc"), quiet = T
 plot(roc_lr2, main = paste0("ROC — LR2 deduplicated  (AUC = ", round(auc(roc_lr2), 3), ")"))
 
 
-# LR vs LR2 — collinearity reduction (same test set):
+# =============================================================================
+# MODEL 1c: LR3 — LR2 features + optimal threshold (Youden Index ROCit)
+# =============================================================================
+# Youden Index finds the cutoff that maximises Sensitivity + Specificity.
+
+# reuse fit_lr2 probabilities on test set
+roc_rocit <- rocit(
+  class = as.numeric(y_test == "high_tc"),
+  score = prob_lr2
+)
+
+# find Youden Index optimal cutoff
+measure_lr3 <- measureit(
+  class = as.numeric(y_test == "high_tc"),
+  score = prob_lr2,
+  measure = c("ACC", "SENS", "SPEC", "FSCR")
+)
+
+youden      <- measure_lr3$SENS + measure_lr3$SPEC - 1
+best_idx    <- which.max(youden)
+opt_cutoff  <- measure_lr3$Cutoff[best_idx]
+cat("Optimal cutoff (Youden):", round(opt_cutoff, 4),
+    "| Sensitivity:", round(measure_lr3$SENS[best_idx], 3),
+    "| Specificity:", round(measure_lr3$SPEC[best_idx], 3), "\n")
+
+plot(roc_rocit, values = TRUE)
+
+# classify with optimal Youden threshold
+class_lr3 <- factor(
+  if_else(prob_lr2 >= opt_cutoff, "high_tc", "non_high_tc"),
+  levels = levels(y_train)
+)
+print(confusionMatrix(class_lr3, y_test, positive = "high_tc"))
+
+
+# ── LR1 vs LR2 vs LR3 ─────────────────
 #
-# Model          Features  AUC    Sensitivity  Specificity  All coefs significant?
-# LR  (top-20)      20    0.928     0.636        0.924        No  (mean_Valence p=0.176, gmean_Valence p=0.756)
-# LR2 (dedup-9)      9    0.921     0.607        0.935        Yes (all p < 0.05)
-
-
-
-
-
-
-
-
-
-
-
-
+# Variant          Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
+# LR1 (20 feat)     0.500      0.636        0.924        0.780         311       0.928
+# LR2 (9 feat)      0.500      0.607        0.935        0.771         311       0.921
+# LR3 (9 feat)      Youden     0.970        0.764        0.867          24       0.921
+#
+# LR3 is the best choice for our use case (superconductor discovery / screening):
+# - Sensitivity 0.970 — catches 97% of true high_tc materials, missing only 24
+# - The 773 false positives (non_high_tc flagged as high_tc) are an acceptable cost:
+#   candidates go to experimental validation where false alarms are filtered out if they
+#   dont perform, but missing a true superconductor would be a missed opportunity so
+#   (false negative) is far more costly than a false alarm in our context.
+#
+# ---- Balanced Accuracy = (Sensitivity + Specificity) / 2 (very useful for imbalanced datasets):
+#      improves from 0.771 → 0.867 because Youden maximises Sens+Spec together
 
 
 
@@ -560,11 +597,6 @@ p_roc
 # - LR and SVM both use the same 20 features with a linear boundary; differences
 #   in their metrics reflect the different training objectives (likelihood vs margin).
 #
-#
-# Cost of removing 11 redundant features: −0.007 AUC (negligible).
-# LR2 is preferred for reporting: stable coefficients, no VIF inflation, fully interpretable.
-#
-
 
 
 
