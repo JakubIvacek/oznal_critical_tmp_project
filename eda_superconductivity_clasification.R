@@ -137,7 +137,7 @@ feature_screening <- data %>%
   arrange(desc(abs_smd))
 
 feature_screening %>%
-  slice_head(n = 15)
+  slice_head(n = 20)
 
 # Correlation of each predictor with class label
 # Point-biserial style correlation: numeric predictor vs binary class.
@@ -157,7 +157,7 @@ class_correlations <- data %>%
   arrange(desc(abs(corr_to_class)))
 
 class_correlations %>%
-  slice_head(n = 15)
+  slice_head(n = 20)
 
 feature_ranking <- feature_screening %>%
   left_join(class_correlations, by = "feature") %>%
@@ -165,12 +165,12 @@ feature_ranking <- feature_screening %>%
 
 feature_ranking %>%
   select(feature, abs_smd, corr_to_class, mean_diff) %>%
-  slice_head(n = 15)
+  slice_head(n = 20)
 
 # Plot top features 
 
 top_features <- feature_ranking %>%
-  slice_head(n = 8) %>%
+  slice_head(n = 20) %>%
   pull(feature)
 
 plot_data <- data %>%
@@ -247,7 +247,7 @@ strong_pairs %>%
 
 # Save shortlist
 feature_shortlist <- feature_ranking %>%
-  slice_head(n = 15) %>%
+  slice_head(n = 20) %>%
   pull(feature)
 
 feature_shortlist
@@ -277,10 +277,9 @@ outlier_counts
 # LR and SVM are sensitive — remove rows with extreme values in any top-20
 # which could be possibly used in these models.
 
-top20_eda <- feature_ranking %>% slice_head(n = 20) %>% pull(feature)
 
 keep_rows <- rep(TRUE, nrow(data))
-for (feat in top20_eda) {
+for (feat in feature_shortlist) {
   vals  <- data[[feat]]
   q1    <- quantile(vals, 0.25)
   q3    <- quantile(vals, 0.75)
@@ -295,19 +294,22 @@ cat("Rows original:", nrow(data),
     "| After outlier removal:", nrow(data_clean),
     "| Removed:", sum(!keep_rows), "\n")
 
+
+
+
+
 # =============================================================================
 # TASK 1 — MODELS: Three Methods × Two Feature-Space Partitioning Families
 #
 # A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)
 # B — Recursive binary:   (3) Random Forest
 #
-# A methods use top-20 features (from feature_ranking above).
-# B uses all 81 numeric predictors.
 # =============================================================================
 
 set.seed(42)
 
-# top20_eda defined in EDA outlier-removal block — reused here for LR and SVM
+# top20_eda defined in EDA outlier-removal block
+top20_eda <- feature_shortlist
 
 # ── TRAIN / TEST SPLIT (80 / 20) ───────────────────────────────────
 
@@ -331,7 +333,7 @@ cat("Test class balance:\n")
 print(count(test_df,  tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01)))
 
 # =============================================================================
-# MODEL 1: LOGISTIC REGRESSION — linear hyperplane
+# MODEL 1a: LOGISTIC REGRESSION — linear hyperplane — all top features
 # =============================================================================
 
 fit_lr <- glm(
@@ -373,6 +375,67 @@ print(confusionMatrix(class_lr, y_test, positive = "high_tc"))
 
 roc_lr <- roc(y_test, prob_lr, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_lr, main = paste0("ROC — Logistic Regression  (AUC = ", round(auc(roc_lr), 3), ")"))
+
+
+# =============================================================================
+# MODEL 1b: LOGISTIC REGRESSION — features with too much correlation removed
+# =============================================================================
+# Collinearity check revealed clusters in the top-20 features:
+#   wtd_mean_Valence, wtd_gmean_Valence, mean_Valence, gmean_Valence (~0.99)
+#   std_ThermalConductivity, wtd_std_ThermalConductivity, range_ThermalConductivity (~0.96-0.99)
+#   wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_atomic_radius, entropy_Valence (~0.90-0.96)
+#   std_atomic_radius, range_atomic_radius, wtd_std_atomic_radius, range_fie (~0.87-0.97)
+#   range_fie, wtd_std_fie, std_fie (~0.87+)
+# Strategy: keep one representative per tight cluster
+#           keep two from the entropy group
+#           keep all not in any cluster
+
+lr2_features <- c(
+  "wtd_mean_Valence",            # Valence location — 1 of 4 (r≈0.99)
+  "wtd_std_ThermalConductivity", # TC spread        — 1 of 3 (r≈0.96-0.99)
+  "range_atomic_radius",         # atomic_radius spread — 1 of 4
+  "wtd_entropy_Valence",         # Entropy group    — 2 of 4 
+  "wtd_entropy_atomic_mass",
+  "wtd_std_fie",                 # fie spread       — 1 of 3 (r≈0.87+)
+  "wtd_entropy_FusionHeat",      # not in any cluster
+  "gmean_Density",               # not in any cluster
+  "range_atomic_mass"            # not in any cluster
+)
+
+fit_lr2 <- glm(
+  tc_class ~ .,
+  data   = bind_cols(train_df %>% select(all_of(lr2_features)), tc_class = y_train),
+  family = binomial(link = "logit")
+)
+cat("\nLR2 (deduplicated) converged:", fit_lr2$converged, "\n")
+print(tidy(fit_lr2), n = length(lr2_features) + 1)
+
+prob_lr2  <- predict(fit_lr2, newdata = test_df %>% select(all_of(lr2_features)), type = "response")
+class_lr2 <- factor(if_else(prob_lr2 >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
+
+print(confusionMatrix(class_lr2, y_test, positive = "high_tc"))
+
+roc_lr2 <- roc(y_test, prob_lr2, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_lr2, main = paste0("ROC — LR2 deduplicated  (AUC = ", round(auc(roc_lr2), 3), ")"))
+
+
+# LR vs LR2 — collinearity reduction (same test set):
+#
+# Model          Features  AUC    Sensitivity  Specificity  All coefs significant?
+# LR  (top-20)      20    0.928     0.636        0.924        No  (mean_Valence p=0.176, gmean_Valence p=0.756)
+# LR2 (dedup-9)      9    0.921     0.607        0.935        Yes (all p < 0.05)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -447,41 +510,8 @@ print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
 roc_rf <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_rf, main = paste0("ROC — Random Forest  (AUC = ", round(auc(roc_rf), 3), ")"))
 
-# =============================================================================
-# COMPARISON — all three models
-# =============================================================================
 
-compute_metrics <- function(pred_class, pred_prob, truth, label, partition) {
-  cm <- tibble(pred = pred_class, truth = truth) %>%
-    summarise(
-      tp = sum(pred == "high_tc"     & truth == "high_tc"),
-      tn = sum(pred == "non_high_tc" & truth == "non_high_tc"),
-      fp = sum(pred == "high_tc"     & truth == "non_high_tc"),
-      fn = sum(pred == "non_high_tc" & truth == "high_tc")
-    )
-  precision   <- cm$tp / (cm$tp + cm$fp)
-  sensitivity <- cm$tp / (cm$tp + cm$fn)
-  tibble(
-    Method       = label,
-    Partitioning = partition,
-    Accuracy     = round((cm$tp + cm$tn) / (cm$tp + cm$tn + cm$fp + cm$fn), 4),
-    Sensitivity  = round(sensitivity, 4),
-    Specificity  = round(cm$tn / (cm$tn + cm$fp), 4),
-    F1           = round(2 * precision * sensitivity / (precision + sensitivity), 4),
-    AUC          = round(as.numeric(auc(
-      roc(truth, pred_prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-    )), 4)
-  )
-}
 
-perf_table <- bind_rows(
-  compute_metrics(class_lr,  prob_lr,  y_test, "Logistic Regression", "Linear hyperplane"),
-  compute_metrics(class_svm, prob_svm, y_test, "SVM (linear)",        "Linear hyperplane"),
-  compute_metrics(class_rf,  prob_rf,  y_test, "Random Forest",       "Recursive binary")
-)
-
-cat("\n=== PERFORMANCE TABLE ===\n")
-print(perf_table, width = 120)
 
 roc_to_df <- function(pred_prob, truth, label) {
   r <- roc(truth, pred_prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
@@ -529,6 +559,10 @@ p_roc
 #
 # - LR and SVM both use the same 20 features with a linear boundary; differences
 #   in their metrics reflect the different training objectives (likelihood vs margin).
+#
+#
+# Cost of removing 11 redundant features: −0.007 AUC (negligible).
+# LR2 is preferred for reporting: stable coefficients, no VIF inflation, fully interpretable.
 #
 
 
