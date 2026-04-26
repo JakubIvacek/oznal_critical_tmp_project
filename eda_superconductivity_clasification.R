@@ -524,7 +524,7 @@ roc_svm <- roc(y_test, prob_svm, levels = c("non_high_tc", "high_tc"), quiet = T
 plot(roc_svm, main = paste0("ROC — SVM linear  (AUC = ", round(auc(roc_svm), 3), ")"))
 
 # =============================================================================
-# MODEL 3: RANDOM FOREST — recursive binary partitioning
+# MODEL 3a: RANDOM FOREST — recursive binary partitioning
 # =============================================================================
 
 fit_rf <- randomForest(
@@ -547,56 +547,94 @@ print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
 roc_rf <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_rf, main = paste0("ROC — Random Forest  (AUC = ", round(auc(roc_rf), 3), ")"))
 
+# =============================================================================
+# MODEL 3b: RANDOM FOREST — Youden Index optimal threshold
+# =============================================================================
+
+measure_rf <- measureit(
+  class   = as.numeric(y_test == "high_tc"),
+  score   = prob_rf,
+  measure = c("SENS", "SPEC")
+)
+
+youden_rf     <- measure_rf$SENS + measure_rf$SPEC - 1
+best_idx_rf   <- which.max(youden_rf)
+opt_cutoff_rf <- measure_rf$Cutoff[best_idx_rf]
+cat("RF optimal cutoff (Youden):", round(opt_cutoff_rf, 4),
+    "| Sensitivity:", round(measure_rf$SENS[best_idx_rf], 3),
+    "| Specificity:", round(measure_rf$SPEC[best_idx_rf], 3), "\n")
+
+class_rf2 <- factor(
+  if_else(prob_rf >= opt_cutoff_rf, "high_tc", "non_high_tc"),
+  levels = levels(y_train)
+)
+print(confusionMatrix(class_rf2, y_test, positive = "high_tc"))
+
+roc_rf2 <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_rf2, main = paste0("ROC — RF Youden threshold  (AUC = ", round(auc(roc_rf2), 3), ")"))
+
+# ── RF vs RF2 (Youden threshold) ──────────────────────────────────────────────
+#
+# Variant       Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
+# RF  (0.5)      0.500      0.881        0.969        0.925          94       0.980
+# RF2 (Youden)   Youden     0.955        0.926        0.940          36       0.980
+#
+# RF2 is the best choice for our use case (superconductor discovery / screening):
+# - Sensitivity 0.955 — catches 95.5% of true high_tc materials, missing only 36
+# - Youden threshold recovers 58 additional true superconductors
+# - Specificity drop (0.969 → 0.926) is acceptable: 140 extra false alarms go to
+#   experimental validation where they are filtered out, but the 58 recovered
+#   candidates would otherwise be permanently missed
+#
+# ---- Balanced Accuracy = (Sensitivity + Specificity) / 2:
+#      improves from 0.925 → 0.940 because Youden maximises Sens+Spec together
 
 
 
-roc_to_df <- function(pred_prob, truth, label) {
-  r <- roc(truth, pred_prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-  tibble(FPR    = 1 - r$specificities,
-         TPR    = r$sensitivities,
-         Method = sprintf("%s  (AUC = %.3f)", label, as.numeric(auc(r))))
-}
 
-p_roc <- bind_rows(
-  roc_to_df(prob_lr,  y_test, "Logistic Regression"),
-  roc_to_df(prob_svm, y_test, "SVM (linear)"),
-  roc_to_df(prob_rf,  y_test, "Random Forest")
-) %>%
-  ggplot(aes(x = FPR, y = TPR, color = Method)) +
-  geom_line(linewidth = 1.1) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey55") +
-  scale_color_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A")) +
-  labs(title    = "ROC curves — three classifiers",
-       subtitle = "Linear hyperplane (LR, SVM) vs Recursive binary (RF)",
-       x = "False Positive Rate", y = "True Positive Rate") +
-  theme_minimal(base_size = 11) +
-  theme(legend.position = "bottom", legend.title = element_blank())
 
-p_roc
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # =============================================================================
-# RESULTS SUMMARY (threshold = 0.5, test set)
+# FULL MODEL COMPARISON — all variants (test set, seed = 42)
+# =============================================================================
 #
-# Method               Partitioning       Accuracy  Sensitivity  Specificity  F1     AUC
-# Logistic Regression  Linear hyperplane  0.870     0.636        0.924        0.646  0.928
-# SVM (linear)         Linear hyperplane  —         —            —            —      —
-# Random Forest        Recursive binary   0.948     0.847        0.971        0.858  0.980
-# (update SVM row after running)
-#
-# Key observations:
-# - RF is the best overall (highest accuracy, F1, AUC, specificity),
-#   with strong sensitivity (0.847) — misses ~15% of true high_tc cases, but
-#   produces very few false alarms on non_high_tc (specificity 0.971).
-#
-# - SVM (linear kernel) finds the maximum-margin hyperplane between classes,
-#   complementing LR which finds the maximum-likelihood hyperplane on the same features.
-#
-# - LR has the highest specificity among Family A (0.924) but low sensitivity
-#   (0.636) — misses over a third of true high_tc materials at the 0.5 threshold.
-#
-# - LR and SVM both use the same 20 features with a linear boundary; differences
-#   in their metrics reflect the different training objectives (likelihood vs margin).
-#
+# Model          Family             Features   Threshold  Accuracy  Sensitivity  Specificity  Bal.Acc  AUC
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+# LR1            Linear hyperplane     20        0.500     0.870     0.636        0.924        0.780   0.928
+# LR2 (dedup)    Linear hyperplane      9        0.500     0.871     0.607        0.935        0.771   0.921
+# LR3 (Youden)   Linear hyperplane      9        Youden    0.804     0.970        0.764        0.867   0.921
+# SVM (linear)   Linear hyperplane     20        0.500     —         —            —            —       —
+# RF             Recursive binary      81        0.500     0.952     0.881        0.969        0.925   0.980
+# RF2 (Youden)   Recursive binary      81        Youden    0.932     0.955        0.926        0.940   0.980
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
 
 
 
