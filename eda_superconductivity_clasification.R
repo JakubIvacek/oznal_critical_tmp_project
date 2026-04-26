@@ -5,6 +5,7 @@ library(magrittr)
 library(pheatmap)
 library(e1071)        # svm()
 library(randomForest) # randomForest()
+library(caret)        # confusionMatrix()
 library(pROC)         # roc(), auc()
 library(broom)        # tidy()
 library(ggrepel)
@@ -271,25 +272,47 @@ outlier_counts <- data %>%
 
 outlier_counts
 
+# ── OUTLIER REMOVAL for LR and SVM (IQR method for top 20 features) ───
+# Random Forests (RF) are robust to outliers we will use full data.
+# LR and SVM are sensitive — remove rows with extreme values in any top-20
+# which could be possibly used in these models.
+
+top20_eda <- feature_ranking %>% slice_head(n = 20) %>% pull(feature)
+
+keep_rows <- rep(TRUE, nrow(data))
+for (feat in top20_eda) {
+  vals  <- data[[feat]]
+  q1    <- quantile(vals, 0.25)
+  q3    <- quantile(vals, 0.75)
+  iqr_v <- q3 - q1
+  keep_rows <- keep_rows &
+    vals >= q1 - 1.5 * iqr_v &
+    vals <= q3 + 1.5 * iqr_v
+}
+
+data_clean <- data[keep_rows, ]
+cat("Rows original:", nrow(data),
+    "| After outlier removal:", nrow(data_clean),
+    "| Removed:", sum(!keep_rows), "\n")
 
 # =============================================================================
 # TASK 1 — MODELS: Three Methods × Two Feature-Space Partitioning Families
 #
-# Family A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)
-# Family B — Recursive binary:   (3) Random Forest
+# A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)
+# B — Recursive binary:   (3) Random Forest
 #
-# Family A methods use top-20 features (from feature_ranking above).
-# Family B uses all 81 numeric predictors.
+# A methods use top-20 features (from feature_ranking above).
+# B uses all 81 numeric predictors.
 # =============================================================================
 
 set.seed(42)
 
-# top-20 features for linear methods (reuse feature_ranking from EDA)
-top20 <- feature_ranking %>% slice_head(n = 20) %>% pull(feature)
+# top20_eda defined in EDA outlier-removal block — reused here for LR and SVM
 
-# ── STRATIFIED TRAIN / TEST SPLIT (80 / 20) ───────────────────────────────────
+# ── TRAIN / TEST SPLIT (80 / 20) ───────────────────────────────────
 
-data_split <- data %>% mutate(row_id = row_number())
+# LR and SVM use data_clean (outliers removed)
+data_split <- data_clean %>% mutate(row_id = row_number())
 
 train_df <- data_split %>%
   group_by(tc_class) %>%
@@ -302,43 +325,107 @@ y_train <- train_df$tc_class
 y_test  <- test_df$tc_class
 
 cat("Train:", nrow(train_df), "| Test:", nrow(test_df), "\n")
-cat("Train class balance:\n"); print(count(train_df, tc_class))
-cat("Test class balance:\n");  print(count(test_df,  tc_class))
+cat("Train class balance:\n")
+print(count(train_df, tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01)))
+cat("Test class balance:\n")
+print(count(test_df,  tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01)))
 
-# ── MODEL 1: LOGISTIC REGRESSION — linear hyperplane ──────────────────────────
+# =============================================================================
+# MODEL 1: LOGISTIC REGRESSION — linear hyperplane
+# =============================================================================
 
 fit_lr <- glm(
   tc_class ~ .,
-  data   = bind_cols(train_df %>% select(all_of(top20)), tc_class = y_train),
+  data   = bind_cols(train_df %>% select(all_of(top20_eda)), tc_class = y_train),
   family = binomial(link = "logit")
 )
 cat("\nLogistic Regression converged:", fit_lr$converged, "\n")
+print(tidy(fit_lr), n = 21)
 
-prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20)), type = "response")
-class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"),
-                   levels = levels(y_train))
+# term                         estimate std.error statistic   p.value
+#  1 (Intercept)                   5.50     1.47         3.74  1.82e-  4
+#  2 wtd_std_ThermalConductivity   0.0406   0.00353     11.5   1.13e- 30  *
+#  3 range_ThermalConductivity    -0.0361   0.00455     -7.94  2.05e- 15  *
+#  4 std_ThermalConductivity       0.0822   0.00949      8.67  4.43e- 18  *
+#  5 range_atomic_radius           0.0476   0.00502      9.47  2.75e- 21  *
+#  6 wtd_mean_Valence              4.60     1.59         2.89  3.89e-  3  *
+#  7 wtd_gmean_Valence           -11.9      2.08        -5.70  1.23e-  8  *
+#  8 mean_Valence                  1.01     0.750        1.35  1.76e-  1  *  
+#  9 wtd_entropy_atomic_mass       4.85     0.653        7.42  1.18e- 13  *
+# 10 range_fie                     0.00908  0.00168      5.40  6.54e-  8  *
+# 11 wtd_std_atomic_radius         0.0348   0.0121       2.87  4.14e-  3  *
+# 12 wtd_entropy_atomic_radius    -5.47     1.01        -5.43  5.54e-  8  *
+# 13 gmean_Valence                -0.302    0.972       -0.311 7.56e-  1    
+# 14 wtd_entropy_Valence          -6.37     0.595      -10.7   9.61e- 27  *
+# 15 std_atomic_radius            -0.0799   0.0140      -5.73  1.01e-  8  *
+# 16 entropy_Valence               2.03     0.664        3.06  2.22e-  3  *
+# 17 wtd_std_fie                  -0.0237   0.00273     -8.68  3.81e- 18  *
+# 18 wtd_entropy_FusionHeat        7.39     0.565       13.1   3.49e- 39  *
+# 19 std_fie                      -0.0231   0.00446     -5.18  2.20e-  7  *
+# 20 gmean_Density                -0.00376  0.000236   -15.9   3.10e- 57  *
+# 21 range_atomic_mass             0.0361   0.00163     22.2   6.68e-109  *
+# Non-significant (p > 0.05): mean_Valence (p=0.176), gmean_Valence (p=0.756)
 
-# ── MODEL 2: SVM — linear kernel (linear hyperplane family) ───────────────────
+prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20_eda)), type = "response")
+class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
+
+print(confusionMatrix(class_lr, y_test, positive = "high_tc"))
+
+roc_lr <- roc(y_test, prob_lr, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_lr, main = paste0("ROC — Logistic Regression  (AUC = ", round(auc(roc_lr), 3), ")"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Robiim ten hore ja 
+
+# =============================================================================
+# MODEL 2: SVM — linear kernel (linear hyperplane family)
+# =============================================================================
 # SVM finds the maximum-margin hyperplane between classes.
 # Linear kernel keeps the decision boundary linear, comparable to LR.
 # probability = TRUE enables Platt scaling to produce class probabilities for ROC.
 
-fit_svm  <- svm(
+fit_svm <- svm(
   tc_class ~ .,
-  data        = bind_cols(train_df %>% select(all_of(top20)), tc_class = y_train),
+  data        = bind_cols(train_df %>% select(all_of(top20_eda)), tc_class = y_train),
   kernel      = "linear",
   probability = TRUE
 )
+cat("SVM support vectors:", nrow(fit_svm$SV), "\n")
 
 pred_svm  <- predict(fit_svm,
-                     newdata     = test_df %>% select(all_of(top20)),
+                     newdata     = test_df %>% select(all_of(top20_eda)),
                      probability = TRUE)
 class_svm <- pred_svm
 prob_svm  <- attr(pred_svm, "probabilities")[, "high_tc"]
 
-cat("SVM support vectors:", nrow(fit_svm$SV), "\n")
+print(confusionMatrix(class_svm, y_test, positive = "high_tc"))
 
-# ── MODEL 3: RANDOM FOREST — recursive binary partitioning ────────────────────
+roc_svm <- roc(y_test, prob_svm, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_svm, main = paste0("ROC — SVM linear  (AUC = ", round(auc(roc_svm), 3), ")"))
+
+# =============================================================================
+# MODEL 3: RANDOM FOREST — recursive binary partitioning
+# =============================================================================
 
 fit_rf <- randomForest(
   tc_class ~ .,
@@ -348,16 +435,21 @@ fit_rf <- randomForest(
   mtry       = floor(sqrt(length(numeric_predictors))),
   importance = TRUE
 )
+# OOB sampling gives an unbiased estimate of test error without a separate validation set.
+cat("RF OOB error:", round(fit_rf$err.rate[500, "OOB"], 4), "\n")
 
 class_rf <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predictors)))
 prob_rf  <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predictors)),
                     type = "prob")[, "high_tc"]
 
-# OOB sampling is used so OOB error is an unbiased estimate of
-# test error without needing a separate validation set.
-cat("RF OOB error:", round(fit_rf$err.rate[500, "OOB"], 4), "\n")
+print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
 
-# ── PERFORMANCE METRICS ───────────────────────────────────────────────────────
+roc_rf <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_rf, main = paste0("ROC — Random Forest  (AUC = ", round(auc(roc_rf), 3), ")"))
+
+# =============================================================================
+# COMPARISON — all three models
+# =============================================================================
 
 compute_metrics <- function(pred_class, pred_prob, truth, label, partition) {
   cm <- tibble(pred = pred_class, truth = truth) %>%
@@ -390,22 +482,6 @@ perf_table <- bind_rows(
 
 cat("\n=== PERFORMANCE TABLE ===\n")
 print(perf_table, width = 120)
-
-# ── CONFUSION MATRICES ────────────────────────────────────────────────────────
-
-show_cm <- function(pred_class, truth, label) {
-  cat(sprintf("\n── %s ──\n", label))
-  tibble(Predicted = pred_class, Actual = truth) %>%
-    count(Predicted, Actual) %>%
-    pivot_wider(names_from = Actual, values_from = n, values_fill = 0L) %>%
-    print()
-}
-
-show_cm(class_lr,  y_test, "Logistic Regression")
-show_cm(class_svm, y_test, "SVM (linear)")
-show_cm(class_rf,  y_test, "Random Forest")
-
-# ── ROC CURVES ────────────────────────────────────────────────────────────────
 
 roc_to_df <- function(pred_prob, truth, label) {
   r <- roc(truth, pred_prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
@@ -458,71 +534,3 @@ p_roc
 
 
 
-
-# SUGGESTED NEXT STEPS:
-# 1. Youden index threshold — replace the fixed 0.5 cutoff with the threshold that
-#    maximises (sensitivity + specificity - 1) on the ROC curve. This is the lecture-
-#    recommended approach and would likely close the sensitivity gap for LR.
-#    coords(roc_obj, "best", best.method = "youden") from pROC does this in one line.
-#
-# 2. Cross-validation — the current single 80/20 split gives one estimate of
-#    performance. k-fold CV (e.g. k=5 or k=10) would give a more stable estimate
-#    with confidence intervals, especially important for SVM whose margin is
-#    sensitive to the exact training sample.
-#
-# 3. RF variable importance plot — importance=TRUE was set during training, so
-#    varImpPlot(fit_rf) can show which of the 81 features drive RF's predictions.
-#    Useful for comparing against the top-20 selected for LR/SVM.
-#
-# 4. Feature scaling for SVM — the classification setting table states scaling is
-#    required for optimal SVM performance. Add z-score scaling fitted on train only
-#    and apply to both train and test before fitting fit_svm. LR does not need this.
-#
-# 5. Outlier removal before SVM — the EDA (outlier_counts) showed heavy outliers
-#    across many features, and the classification table explicitly flags SVM as
-#    sensitive to outliers. Consider capping values at IQR ± 3*IQR or removing
-#    extreme rows before fitting SVM to improve margin stability.
-# =============================================================================
-
-
-# =============================================================================
-# TASK 3 — FEATURE SELECTION: Algorithmic + Embedded Methods
-#
-# Goal: compare one algorithmic and two embedded selection methods on the same
-# classification task, report features retained and significance changes.
-#
-# ALGORITHMIC — Stepwise selection (forward / backward / mixed):
-#   Use stepAIC() from MASS (already loaded) on a logistic regression fit.
-#   direction = "forward"  starts with intercept only, adds features one by one
-#   direction = "backward" starts with all features, removes the least useful
-#   direction = "both"     mixed — recommended, combines both directions
-#   Example:
-#     fit_step <- stepAIC(
-#       glm(tc_class ~ ., data = train_top20, family = binomial),
-#       direction = "both", trace = FALSE
-#     )
-#     summary(fit_step)  # see which features remain and their p-values
-#
-# EMBEDDED METHOD 1 — Lasso (alpha = 1):
-#   Lasso adds an L1 penalty that shrinks some coefficients exactly to zero,
-#   effectively performing feature selection. Requires glmnet package.
-#     library(glmnet)
-#     x_train <- as.matrix(train_df %>% select(all_of(numeric_predictors)))
-#     y_train_bin <- as.numeric(y_train == "high_tc")
-#     cv_lasso <- cv.glmnet(x_train, y_train_bin, family = "binomial", alpha = 1)
-#     coef(cv_lasso, s = "lambda.min")  # non-zero coefficients = retained features
-#
-# EMBEDDED METHOD 2 — Elastic Net (0 < alpha < 1, e.g. alpha = 0.5):
-#   Combines L1 (lasso) and L2 (ridge) penalties. Ridge alone (alpha = 0) shrinks
-#   but never zeros out coefficients so it does not select features — elastic net
-#   is the better second embedded method to pair with lasso.
-#     cv_enet <- cv.glmnet(x_train, y_train_bin, family = "binomial", alpha = 0.5)
-#     coef(cv_enet, s = "lambda.min")
-#
-# REPORTING:
-#   - Count non-zero coefficients in lasso / elastic net at lambda.min and lambda.1se
-#   - Compare retained feature sets across stepwise, lasso, and elastic net
-#   - Note which features appear in all three (most stable) vs only one (fragile)
-#   - Check if features that were significant in LR (Task 1) lose significance
-#     when other predictors are added / removed during stepwise search
-# =============================================================================
