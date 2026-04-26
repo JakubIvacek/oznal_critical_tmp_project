@@ -3,7 +3,7 @@ library(ggplot2)
 library(patchwork)
 library(magrittr)
 library(pheatmap)
-library(MASS)         # lda() / qda()
+library(e1071)        # svm()
 library(randomForest) # randomForest()
 library(pROC)         # roc(), auc()
 library(broom)        # tidy()
@@ -275,7 +275,7 @@ outlier_counts
 # =============================================================================
 # TASK 1 — MODELS: Three Methods × Two Feature-Space Partitioning Families
 #
-# Family A — Linear hyperplane:  (1) Logistic Regression  (2) QDA
+# Family A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)
 # Family B — Recursive binary:   (3) Random Forest
 #
 # Family A methods use top-20 features (from feature_ranking above).
@@ -318,16 +318,25 @@ prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20)), type = 
 class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"),
                    levels = levels(y_train))
 
-# ── MODEL 2: QDA — quadratic discriminant analysis (linear hyperplane family) ─
-# QDA relaxes LDA's equal-covariance assumption: each class gets its own
-# covariance matrix, yielding a quadratic decision boundary.
+# ── MODEL 2: SVM — linear kernel (linear hyperplane family) ───────────────────
+# SVM finds the maximum-margin hyperplane between classes.
+# Linear kernel keeps the decision boundary linear, comparable to LR.
+# probability = TRUE enables Platt scaling to produce class probabilities for ROC.
 
-fit_qda  <- qda(x = as.matrix(train_df %>% select(all_of(top20))), grouping = y_train)
-pred_qda  <- predict(fit_qda, newdata = as.matrix(test_df %>% select(all_of(top20))))
-class_qda <- pred_qda$class
-prob_qda  <- pred_qda$posterior[, "high_tc"]
+fit_svm  <- svm(
+  tc_class ~ .,
+  data        = bind_cols(train_df %>% select(all_of(top20)), tc_class = y_train),
+  kernel      = "linear",
+  probability = TRUE
+)
 
-cat("QDA prior probabilities:", round(fit_qda$prior, 3), "\n")
+pred_svm  <- predict(fit_svm,
+                     newdata     = test_df %>% select(all_of(top20)),
+                     probability = TRUE)
+class_svm <- pred_svm
+prob_svm  <- attr(pred_svm, "probabilities")[, "high_tc"]
+
+cat("SVM support vectors:", nrow(fit_svm$SV), "\n")
 
 # ── MODEL 3: RANDOM FOREST — recursive binary partitioning ────────────────────
 
@@ -375,7 +384,7 @@ compute_metrics <- function(pred_class, pred_prob, truth, label, partition) {
 
 perf_table <- bind_rows(
   compute_metrics(class_lr,  prob_lr,  y_test, "Logistic Regression", "Linear hyperplane"),
-  compute_metrics(class_qda, prob_qda, y_test, "QDA",                 "Linear hyperplane"),
+  compute_metrics(class_svm, prob_svm, y_test, "SVM (linear)",        "Linear hyperplane"),
   compute_metrics(class_rf,  prob_rf,  y_test, "Random Forest",       "Recursive binary")
 )
 
@@ -393,7 +402,7 @@ show_cm <- function(pred_class, truth, label) {
 }
 
 show_cm(class_lr,  y_test, "Logistic Regression")
-show_cm(class_qda, y_test, "QDA")
+show_cm(class_svm, y_test, "SVM (linear)")
 show_cm(class_rf,  y_test, "Random Forest")
 
 # ── ROC CURVES ────────────────────────────────────────────────────────────────
@@ -407,15 +416,15 @@ roc_to_df <- function(pred_prob, truth, label) {
 
 p_roc <- bind_rows(
   roc_to_df(prob_lr,  y_test, "Logistic Regression"),
-  roc_to_df(prob_qda, y_test, "QDA"),
+  roc_to_df(prob_svm, y_test, "SVM (linear)"),
   roc_to_df(prob_rf,  y_test, "Random Forest")
 ) %>%
   ggplot(aes(x = FPR, y = TPR, color = Method)) +
   geom_line(linewidth = 1.1) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey55") +
-  scale_color_manual(values = c("#E41A1C", "#984EA3", "#4DAF4A")) +
+  scale_color_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A")) +
   labs(title    = "ROC curves — three classifiers",
-       subtitle = "Linear hyperplane (LR, QDA) vs Recursive binary (RF)",
+       subtitle = "Linear hyperplane (LR, SVM) vs Recursive binary (RF)",
        x = "False Positive Rate", y = "True Positive Rate") +
   theme_minimal(base_size = 11) +
   theme(legend.position = "bottom", legend.title = element_blank())
@@ -427,23 +436,23 @@ p_roc
 #
 # Method               Partitioning       Accuracy  Sensitivity  Specificity  F1     AUC
 # Logistic Regression  Linear hyperplane  0.870     0.636        0.924        0.646  0.928
-# QDA                  Linear hyperplane  0.776     0.957        0.734        0.614  0.909
+# SVM (linear)         Linear hyperplane  —         —            —            —      —
 # Random Forest        Recursive binary   0.948     0.847        0.971        0.858  0.980
+# (update SVM row after running)
 #
 # Key observations:
 # - RF is the best overall (highest accuracy, F1, AUC, specificity),
 #   with strong sensitivity (0.847) — misses ~15% of true high_tc cases, but
 #   produces very few false alarms on non_high_tc (specificity 0.971).
 #
-# - QDA has the highest sensitivity (0.957) — misses only 4.3% of true high_tc cases, but
-#   produces many false alarms on non_high_tc as we can see on the low specificity 0.734.
+# - SVM (linear kernel) finds the maximum-margin hyperplane between classes,
+#   complementing LR which finds the maximum-likelihood hyperplane on the same features.
 #
 # - LR has the highest specificity among Family A (0.924) but low sensitivity
 #   (0.636) — misses over a third of true high_tc materials at the 0.5 threshold.
 #
-# - LR and QDA use the same 20 features yet have opposite sensitivity/specificity
-#   profiles because the 0.5 threshold is too high for LR given the class imbalance
-#   (~76% non_high_tc), pushing predictions toward the majority class.
+# - LR and SVM both use the same 20 features with a linear boundary; differences
+#   in their metrics reflect the different training objectives (likelihood vs margin).
 #
 
 
@@ -458,12 +467,21 @@ p_roc
 #
 # 2. Cross-validation — the current single 80/20 split gives one estimate of
 #    performance. k-fold CV (e.g. k=5 or k=10) would give a more stable estimate
-#    with confidence intervals, especially important for QDA which showed volatile
-#    sensitivity/specificity.
+#    with confidence intervals, especially important for SVM whose margin is
+#    sensitive to the exact training sample.
 #
 # 3. RF variable importance plot — importance=TRUE was set during training, so
 #    varImpPlot(fit_rf) can show which of the 81 features drive RF's predictions.
-#    Useful for comparing against the top-20 selected for LR/QDA.
+#    Useful for comparing against the top-20 selected for LR/SVM.
+#
+# 4. Feature scaling for SVM — the classification setting table states scaling is
+#    required for optimal SVM performance. Add z-score scaling fitted on train only
+#    and apply to both train and test before fitting fit_svm. LR does not need this.
+#
+# 5. Outlier removal before SVM — the EDA (outlier_counts) showed heavy outliers
+#    across many features, and the classification table explicitly flags SVM as
+#    sensitive to outliers. Consider capping values at IQR ± 3*IQR or removing
+#    extreme rows before fitting SVM to improve margin stability.
 # =============================================================================
 
 
