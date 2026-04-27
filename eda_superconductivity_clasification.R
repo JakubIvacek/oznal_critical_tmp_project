@@ -304,8 +304,9 @@ cat("Rows original:", nrow(data),
 # =============================================================================
 # TASK 1 — MODELS: Three Methods × Two Feature-Space Partitioning Families
 #
-# A — Linear hyperplane:  (1) Logistic Regression  (2) SVM (linear kernel)??
-# B — Recursive binary:   (3) Random Forest
+# A — Linear hyperplane:  (1) Logistic Regression
+# B — Recursive binary:   (2) Random Forest
+#                      (3) ??? este nejaky treba pridat
 #
 # =============================================================================
 
@@ -336,7 +337,7 @@ cat("Test class balance:\n")
 print(count(test_df,  tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01)))
 
 # =============================================================================
-# MODEL 1a: LOGISTIC REGRESSION — linear hyperplane — all top features
+# MODEL 1a: LOGISTIC REGRESSION — 20 top features (all shortlisted)
 # =============================================================================
 
 fit_lr <- glm(
@@ -344,65 +345,60 @@ fit_lr <- glm(
   data   = bind_cols(train_df %>% select(all_of(top20_eda)), tc_class = y_train),
   family = binomial(link = "logit")
 )
-cat("\nLogistic Regression converged:", fit_lr$converged, "\n")
+cat("\nLR-A converged:", fit_lr$converged, "\n")
 print(tidy(fit_lr), n = 21)
-
-# term                         estimate std.error statistic   p.value
-#  1 (Intercept)                   5.50     1.47         3.74  1.82e-  4
-#  2 wtd_std_ThermalConductivity   0.0406   0.00353     11.5   1.13e- 30  *
-#  3 range_ThermalConductivity    -0.0361   0.00455     -7.94  2.05e- 15  *
-#  4 std_ThermalConductivity       0.0822   0.00949      8.67  4.43e- 18  *
-#  5 range_atomic_radius           0.0476   0.00502      9.47  2.75e- 21  *
-#  6 wtd_mean_Valence              4.60     1.59         2.89  3.89e-  3  *
-#  7 wtd_gmean_Valence           -11.9      2.08        -5.70  1.23e-  8  *
-#  8 mean_Valence                  1.01     0.750        1.35  1.76e-  1  *  
-#  9 wtd_entropy_atomic_mass       4.85     0.653        7.42  1.18e- 13  *
-# 10 range_fie                     0.00908  0.00168      5.40  6.54e-  8  *
-# 11 wtd_std_atomic_radius         0.0348   0.0121       2.87  4.14e-  3  *
-# 12 wtd_entropy_atomic_radius    -5.47     1.01        -5.43  5.54e-  8  *
-# 13 gmean_Valence                -0.302    0.972       -0.311 7.56e-  1    
-# 14 wtd_entropy_Valence          -6.37     0.595      -10.7   9.61e- 27  *
-# 15 std_atomic_radius            -0.0799   0.0140      -5.73  1.01e-  8  *
-# 16 entropy_Valence               2.03     0.664        3.06  2.22e-  3  *
-# 17 wtd_std_fie                  -0.0237   0.00273     -8.68  3.81e- 18  *
-# 18 wtd_entropy_FusionHeat        7.39     0.565       13.1   3.49e- 39  *
-# 19 std_fie                      -0.0231   0.00446     -5.18  2.20e-  7  *
-# 20 gmean_Density                -0.00376  0.000236   -15.9   3.10e- 57  *
-# 21 range_atomic_mass             0.0361   0.00163     22.2   6.68e-109  *
 # Non-significant (p > 0.05): mean_Valence (p=0.176), gmean_Valence (p=0.756)
 
+# ── LR-A threshold 0.5 ──
 prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20_eda)), type = "response")
 class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
-
 print(confusionMatrix(class_lr, y_test, positive = "high_tc"))
-
 roc_lr <- roc(y_test, prob_lr, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-plot(roc_lr, main = paste0("ROC — Logistic Regression  (AUC = ", round(auc(roc_lr), 3), ")"))
+plot(roc_lr, main = paste0("ROC — LR-A (20 feat)  (AUC = ", round(auc(roc_lr), 3), ")"))
+
+# ── LR-A threshold Youden ──
+measure_lra <- measureit(class = as.numeric(y_test == "high_tc"),
+                         score = prob_lr, measure = c("SENS", "SPEC"))
+youden_lra    <- measure_lra$SENS + measure_lra$SPEC - 1
+opt_cutoff_lra <- measure_lra$Cutoff[which.max(youden_lra)]
+cat("LR-A Youden cutoff:", round(opt_cutoff_lra, 4),
+    "| Sensitivity:", round(measure_lra$SENS[which.max(youden_lra)], 3),
+    "| Specificity:", round(measure_lra$SPEC[which.max(youden_lra)], 3), "\n")
+class_lra_y <- factor(if_else(prob_lr >= opt_cutoff_lra, "high_tc", "non_high_tc"),
+                      levels = levels(y_train))
+print(confusionMatrix(class_lra_y, y_test, positive = "high_tc"))
+
+# ── LR-A summary ──────────────────────────────────────────────────────────────
+# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
+#  0.500      0.636        0.924        0.780         311       0.928
+#  Youden     0.946        0.799        0.873          43       0.928
+#
+# LR-A Youden is preferred for discovery: sensitivity jumps from 0.636 → 0.946,
+# recovering 268 additional HT superconductors at the cost of more false alarms.
+# 2 features non-significant (mean_Valence, gmean_Valence) — collinearity inflates std.errors.
+# ---- Balanced Accuracy improves from 0.780 → 0.873 with Youden threshold.
 
 
 # =============================================================================
-# MODEL 1b: LOGISTIC REGRESSION — features with too much correlation removed
+# MODEL 1b: LOGISTIC REGRESSION — 9 deduplicated features (collinearity removed)
 # =============================================================================
-# Collinearity check revealed clusters in the top-20 features:
-#   wtd_mean_Valence, wtd_gmean_Valence, mean_Valence, gmean_Valence (~0.99)
-#   std_ThermalConductivity, wtd_std_ThermalConductivity, range_ThermalConductivity (~0.96-0.99)
-#   wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_atomic_radius, entropy_Valence (~0.90-0.96)
-#   std_atomic_radius, range_atomic_radius, wtd_std_atomic_radius, range_fie (~0.87-0.97)
-#   range_fie, wtd_std_fie, std_fie (~0.87+)
-# Strategy: keep one representative per tight cluster
-#           keep two from the entropy group
-#           keep all not in any cluster
+# Collinearity clusters in top-20 (r > 0.87) — keep one per group:
+#   Valence location:     wtd_mean_Valence, wtd_gmean_Valence, mean_Valence, gmean_Valence
+#   TC spread:            std/wtd_std/range_ThermalConductivity
+#   atomic_radius spread: std/range/wtd_std_atomic_radius
+#   Entropy (keep 2):     wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_atomic_radius, entropy_Valence
+#   fie spread:           range_fie, wtd_std_fie, std_fie
 
 lr2_features <- c(
   "wtd_mean_Valence",            # Valence location — 1 of 4 (r≈0.99)
   "wtd_std_ThermalConductivity", # TC spread        — 1 of 3 (r≈0.96-0.99)
-  "range_atomic_radius",         # atomic_radius spread — 1 of 4
-  "wtd_entropy_Valence",         # Entropy group    — 2 of 4 
+  "range_atomic_radius",         # atomic_radius spread — 1 of 4 (r≈0.87-0.97)
+  "wtd_entropy_Valence",         # Entropy group    — 2 of 4 (r≈0.90-0.96)
   "wtd_entropy_atomic_mass",
   "wtd_std_fie",                 # fie spread       — 1 of 3 (r≈0.87+)
-  "wtd_entropy_FusionHeat",      # not in any cluster
-  "gmean_Density",               # not in any cluster
-  "range_atomic_mass"            # not in any cluster
+  "wtd_entropy_FusionHeat",      # singleton
+  "gmean_Density",               # singleton
+  "range_atomic_mass"            # singleton
 )
 
 fit_lr2 <- glm(
@@ -410,121 +406,45 @@ fit_lr2 <- glm(
   data   = bind_cols(train_df %>% select(all_of(lr2_features)), tc_class = y_train),
   family = binomial(link = "logit")
 )
-cat("\nLR2 (deduplicated) converged:", fit_lr2$converged, "\n")
+cat("\nLR-B converged:", fit_lr2$converged, "\n")
 print(tidy(fit_lr2), n = length(lr2_features) + 1)
+# All 9 features significant (p < 0.05) — collinearity resolved
 
+# ── LR-B threshold 0.5 ──
 prob_lr2  <- predict(fit_lr2, newdata = test_df %>% select(all_of(lr2_features)), type = "response")
 class_lr2 <- factor(if_else(prob_lr2 >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
-
 print(confusionMatrix(class_lr2, y_test, positive = "high_tc"))
-
 roc_lr2 <- roc(y_test, prob_lr2, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-plot(roc_lr2, main = paste0("ROC — LR2 deduplicated  (AUC = ", round(auc(roc_lr2), 3), ")"))
+plot(roc_lr2, main = paste0("ROC — LR-B (9 feat)  (AUC = ", round(auc(roc_lr2), 3), ")"))
 
+# ── LR-B threshold Youden ──
+measure_lrb <- measureit(class = as.numeric(y_test == "high_tc"),
+                         score = prob_lr2, measure = c("SENS", "SPEC"))
+youden_lrb     <- measure_lrb$SENS + measure_lrb$SPEC - 1
+opt_cutoff_lrb <- measure_lrb$Cutoff[which.max(youden_lrb)]
+cat("LR-B Youden cutoff:", round(opt_cutoff_lrb, 4),
+    "| Sensitivity:", round(measure_lrb$SENS[which.max(youden_lrb)], 3),
+    "| Specificity:", round(measure_lrb$SPEC[which.max(youden_lrb)], 3), "\n")
+class_lrb_y <- factor(if_else(prob_lr2 >= opt_cutoff_lrb, "high_tc", "non_high_tc"),
+                      levels = levels(y_train))
+print(confusionMatrix(class_lrb_y, y_test, positive = "high_tc"))
 
-# =============================================================================
-# MODEL 1c: LR3 — LR2 features + optimal threshold (Youden Index ROCit)
-# =============================================================================
-# Youden Index finds the cutoff that maximises Sensitivity + Specificity.
-
-# reuse fit_lr2 probabilities on test set
-roc_rocit <- rocit(
-  class = as.numeric(y_test == "high_tc"),
-  score = prob_lr2
-)
-
-# find Youden Index optimal cutoff
-measure_lr3 <- measureit(
-  class = as.numeric(y_test == "high_tc"),
-  score = prob_lr2,
-  measure = c("ACC", "SENS", "SPEC", "FSCR")
-)
-
-youden      <- measure_lr3$SENS + measure_lr3$SPEC - 1
-best_idx    <- which.max(youden)
-opt_cutoff  <- measure_lr3$Cutoff[best_idx]
-cat("Optimal cutoff (Youden):", round(opt_cutoff, 4),
-    "| Sensitivity:", round(measure_lr3$SENS[best_idx], 3),
-    "| Specificity:", round(measure_lr3$SPEC[best_idx], 3), "\n")
-
-plot(roc_rocit, values = TRUE)
-
-# classify with optimal Youden threshold
-class_lr3 <- factor(
-  if_else(prob_lr2 >= opt_cutoff, "high_tc", "non_high_tc"),
-  levels = levels(y_train)
-)
-print(confusionMatrix(class_lr3, y_test, positive = "high_tc"))
-
-
-# ── LR1 vs LR2 vs LR3 ─────────────────
+# ── LR-B summary ──────────────────────────────────────────────────────────────
+# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
+#  0.500      0.607        0.935        0.771         311       0.921
+#  Youden     0.970        0.764        0.867          24       0.921
 #
-# Variant          Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-# LR1 (20 feat)     0.500      0.636        0.924        0.780         311       0.928
-# LR2 (9 feat)      0.500      0.607        0.935        0.771         311       0.921
-# LR3 (9 feat)      Youden     0.970        0.764        0.867          24       0.921
-#
-# LR3 is the best choice for our use case (superconductor discovery / screening):
-# - Sensitivity 0.970 — catches 97% of true high_tc materials, missing only 24
-# - The 773 false positives (non_high_tc flagged as high_tc) are an acceptable cost:
-#   candidates go to experimental validation where false alarms are filtered out if they
-#   dont perform, but missing a true superconductor would be a missed opportunity so
-#   (false negative) is far more costly than a false alarm in our context.
-#
-# ---- Balanced Accuracy = (Sensitivity + Specificity) / 2 (very useful for imbalanced datasets):
-#      improves from 0.771 → 0.867 because Youden maximises Sens+Spec together
+# LR-B Youden is the best linear model for discovery: sensitivity 0.970, missing only 24.
+# All 9 coefficients stable and significant — collinearity fully resolved vs LR-A.
+# fully interpretable, trustworthy coefficients.
+# ---- Balanced Accuracy improves from 0.771 → 0.867 with Youden threshold.
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Robiim ten hore ja 
 
 # =============================================================================
-# MODEL 2: SVM — linear kernel (linear hyperplane family)
-# =============================================================================
-# SVM finds the maximum-margin hyperplane between classes.
-# Linear kernel keeps the decision boundary linear, comparable to LR.
-# probability = TRUE enables Platt scaling to produce class probabilities for ROC.
-
-fit_svm <- svm(
-  tc_class ~ .,
-  data        = bind_cols(train_df %>% select(all_of(top20_eda)), tc_class = y_train),
-  kernel      = "linear",
-  probability = TRUE
-)
-cat("SVM support vectors:", nrow(fit_svm$SV), "\n")
-
-pred_svm  <- predict(fit_svm,
-                     newdata     = test_df %>% select(all_of(top20_eda)),
-                     probability = TRUE)
-class_svm <- pred_svm
-prob_svm  <- attr(pred_svm, "probabilities")[, "high_tc"]
-
-print(confusionMatrix(class_svm, y_test, positive = "high_tc"))
-
-roc_svm <- roc(y_test, prob_svm, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-plot(roc_svm, main = paste0("ROC — SVM linear  (AUC = ", round(auc(roc_svm), 3), ")"))
-
-# =============================================================================
-# MODEL 3a: RANDOM FOREST — recursive binary partitioning
+# MODEL 2: RANDOM FOREST — recursive binary partitioning
 # =============================================================================
 
 fit_rf <- randomForest(
@@ -547,10 +467,9 @@ print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
 roc_rf <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_rf, main = paste0("ROC — Random Forest  (AUC = ", round(auc(roc_rf), 3), ")"))
 
-# =============================================================================
-# MODEL 3b: RANDOM FOREST — Youden Index optimal threshold
-# =============================================================================
 
+
+# ── RF threshold Youden ──
 measure_rf <- measureit(
   class   = as.numeric(y_test == "high_tc"),
   score   = prob_rf,
@@ -573,17 +492,17 @@ print(confusionMatrix(class_rf2, y_test, positive = "high_tc"))
 roc_rf2 <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_rf2, main = paste0("ROC — RF Youden threshold  (AUC = ", round(auc(roc_rf2), 3), ")"))
 
-# ── RF vs RF2 (Youden threshold) ──────────────────────────────────────────────
+# ── RF vs RF (Youden threshold) ──────────────────────────────────────────────
 #
 # Variant       Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
 # RF  (0.5)      0.500      0.881        0.969        0.925          94       0.980
-# RF2 (Youden)   Youden     0.955        0.926        0.940          36       0.980
+# RF (Youden)   Youden     0.955        0.926        0.940          36       0.980
 #
-# RF2 is the best choice for our use case (superconductor discovery / screening):
+# RF (Youden) is the best choice for our use case (superconductor discovery / screening):
 # - Sensitivity 0.955 — catches 95.5% of true high_tc materials, missing only 36
 # - Youden threshold recovers 58 additional true superconductors
 # - Specificity drop (0.969 → 0.926) is acceptable: 140 extra false alarms go to
-#   experimental validation where they are filtered out, but the 58 recovered
+#   validation where they are filtered out, but the 58 recovered
 #   candidates would otherwise be permanently missed
 #
 # ---- Balanced Accuracy = (Sensitivity + Specificity) / 2:
@@ -591,40 +510,27 @@ plot(roc_rf2, main = paste0("ROC — RF Youden threshold  (AUC = ", round(auc(ro
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # =============================================================================
-# FULL MODEL COMPARISON — all variants (test set, seed = 42)
+# MODEL 3: ??????
 # =============================================================================
-#
-# Model          Family             Features   Threshold  Accuracy  Sensitivity  Specificity  Bal.Acc  AUC
-# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-# LR1            Linear hyperplane     20        0.500     0.870     0.636        0.924        0.780   0.928
-# LR2 (dedup)    Linear hyperplane      9        0.500     0.871     0.607        0.935        0.771   0.921
-# LR3 (Youden)   Linear hyperplane      9        Youden    0.804     0.970        0.764        0.867   0.921
-# SVM (linear)   Linear hyperplane     20        0.500     —         —            —            —       —
-# RF             Recursive binary      81        0.500     0.952     0.881        0.969        0.925   0.980
-# RF2 (Youden)   Recursive binary      81        Youden    0.932     0.955        0.926        0.940   0.980
-# ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
