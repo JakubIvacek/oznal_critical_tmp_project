@@ -1,10 +1,9 @@
 library(tidyverse)
-library(caret)   # confusionMatrix()
-library(pROC)    # roc(), auc()
-library(broom)   # tidy()
-library(ROCit)   # measureit(), rocit()
+library(caret)   
+library(pROC)    
+library(broom)  
+library(ROCit)   
 
-select <- dplyr::select
 
 load("prepared_data.RData")
 # Loaded: train_df, test_df, y_train, y_test, top20_eda, lr2_features, numeric_predictors
@@ -22,14 +21,14 @@ cat("\nLR-A converged:", fit_lr$converged, "\n")
 print(tidy(fit_lr), n = 21)
 # Non-significant (p > 0.05): mean_Valence (p=0.176), gmean_Valence (p=0.756)
 
-# ── LR-A threshold 0.5 ──
+# ── threshold 0.5 ──
 prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20_eda)), type = "response")
 class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
 print(confusionMatrix(class_lr, y_test, positive = "high_tc"))
 roc_lr <- roc(y_test, prob_lr, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_lr, main = paste0("ROC — LR-A (20 feat)  (AUC = ", round(auc(roc_lr), 3), ")"))
 
-# ── LR-A threshold Youden ──
+# ── threshold Youden ──
 measure_lra    <- measureit(class = as.numeric(y_test == "high_tc"),
                             score = prob_lr, measure = c("SENS", "SPEC"))
 youden_lra     <- measure_lra$SENS + measure_lra$SPEC - 1
@@ -51,15 +50,12 @@ print(confusionMatrix(class_lra_y, y_test, positive = "high_tc"))
 # 2 features non-significant (mean_Valence, gmean_Valence) — collinearity inflates std.errors.
 # ---- Balanced Accuracy improves from 0.780 → 0.873 with Youden threshold.
 
+
+
 # =============================================================================
 # MODEL 1b: LOGISTIC REGRESSION — 9 deduplicated features (collinearity removed)
 # =============================================================================
-# Collinearity clusters in top-20 (r > 0.87) — keep one per group:
-#   Valence location:     wtd_mean_Valence, wtd_gmean_Valence, mean_Valence, gmean_Valence
-#   TC spread:            std/wtd_std/range_ThermalConductivity
-#   atomic_radius spread: std/range/wtd_std_atomic_radius
-#   Entropy (keep 2):     wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_atomic_radius, entropy_Valence
-#   fie spread:           range_fie, wtd_std_fie, std_fie
+
 
 fit_lr2 <- glm(
   tc_class ~ .,
@@ -68,7 +64,6 @@ fit_lr2 <- glm(
 )
 cat("\nLR-B converged:", fit_lr2$converged, "\n")
 print(tidy(fit_lr2), n = length(lr2_features) + 1)
-# All 9 features significant (p < 0.05) — collinearity resolved
 
 # ── LR-B threshold 0.5 ──
 prob_lr2  <- predict(fit_lr2, newdata = test_df %>% select(all_of(lr2_features)), type = "response")
@@ -95,5 +90,5 @@ print(confusionMatrix(class_lrb_y, y_test, positive = "high_tc"))
 #  Youden     0.970        0.764        0.867          24       0.921
 #
 # LR-B Youden is the best linear model for discovery: sensitivity 0.970, missing only 24.
-# All 9 coefficients stable and significant — collinearity fully resolved vs LR-A.
+# All 9 coefficients stable and significant — collinearity resolved and reduced features.
 # ---- Balanced Accuracy improves from 0.771 → 0.867 with Youden threshold.

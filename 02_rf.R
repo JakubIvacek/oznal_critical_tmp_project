@@ -1,16 +1,15 @@
 library(tidyverse)
-library(randomForest) # randomForest()
-library(caret)        # confusionMatrix()
-library(pROC)         # roc(), auc()
-library(ROCit)        # measureit()
+library(randomForest)
+library(caret)        
+library(pROC)         
+library(ROCit)       
 
-select <- dplyr::select
 
 load("prepared_data.RData")
 # Loaded: train_df, test_df, y_train, y_test, numeric_predictors
 
 # =============================================================================
-# MODEL 2a: RANDOM FOREST — recursive binary partitioning (threshold 0.5)
+# MODEL 2: RANDOM FOREST all numeric features
 # =============================================================================
 
 fit_rf <- randomForest(
@@ -31,14 +30,9 @@ prob_rf  <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predicto
 print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
 
 roc_rf <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-plot(roc_rf, main = paste0("ROC — Random Forest  (AUC = ", round(auc(roc_rf), 3), ")"))
 
-# =============================================================================
-# MODEL 2b: RANDOM FOREST — Youden Index optimal threshold
-# =============================================================================
-# RF default threshold is 0.5. Youden Index finds the cutoff maximising
-# Sensitivity + Specificity, better suited for imbalanced discovery tasks.
 
+# ── threshold Youden ────────────────────
 measure_rf    <- measureit(class = as.numeric(y_test == "high_tc"),
                            score = prob_rf, measure = c("SENS", "SPEC"))
 youden_rf     <- measure_rf$SENS + measure_rf$SPEC - 1
@@ -54,15 +48,13 @@ class_rf2 <- factor(
 )
 print(confusionMatrix(class_rf2, y_test, positive = "high_tc"))
 
-roc_rf2 <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
-plot(roc_rf2, main = paste0("ROC — RF Youden threshold  (AUC = ", round(auc(roc_rf2), 3), ")"))
 
 # ── RF summary ────────────────────────────────────────────────────────────────
-# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.881        0.969        0.925          94       0.980
-#  Youden     0.955        0.926        0.940          36       0.980
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
+#  0.500      0.952     0.881        0.969        0.925          94       0.980
+#  Youden     0.932     0.955        0.926        0.940          36       0.980
 #
-# RF (Youden) is the best choice for our use case (superconductor discovery / screening):
+# RF (Youden) is the better choice for our use case (superconductor discovery / screening):
 # - Sensitivity 0.955 — catches 95.5% of true high_tc materials, missing only 36
 # - Youden threshold recovers 58 additional true superconductors vs default 0.5
 # - Specificity drop (0.969 → 0.926) is acceptable: 140 extra false alarms go to

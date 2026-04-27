@@ -197,6 +197,8 @@ p_density <- ggplot(plot_data, aes(x = value, fill = tc_class)) +
 p_box
 p_density
 
+
+
 # Correlation matrix among shortlisted predictors.
 # Goal: identify redundancy before feature selection.
 cor_top <- data %>%
@@ -300,15 +302,31 @@ print(count(train_df, tc_class) %>% mutate(pct = scales::percent(n / sum(n), acc
 cat("Test class balance:\n")
 print(count(test_df,  tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01)))
 
-# ── Deduplicated feature set for LR-B and SVM ────────────────────────────────
-# One representative per correlated cluster (r > 0.87), two from entropy group.
+
+
+# ── Deduplicated feature set for LR and SVM ────────────────────────────────
+# Identified strong_pairs (r > 0.87) + pheatmap clusters from top 20 features:
+#
+# Cluster 1 — Valence location (0.99):
+#   wtd_mean_Valence, wtd_gmean_Valence, mean_Valence, gmean_Valence  → keep: wtd_mean_Valence
+# Cluster 2 — TC spread (0.96-0.99):
+#   std_ThermalConductivity, wtd_std_ThermalConductivity, range_ThermalConductivity  → keep: wtd_std_ThermalConductivity
+# Cluster 3 — atomic_radius spread (0.87-0.97):
+#   std_atomic_radius, range_atomic_radius, wtd_std_atomic_radius  → keep: range_atomic_radius
+# Cluster 4 — Entropy (0.90-0.96, less coupled — keep 2):
+#   wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_atomic_radius, entropy_Valence
+#   → keep: wtd_entropy_Valence + wtd_entropy_atomic_mass
+# Cluster 5 — fie spread (0.87+):
+#   range_fie, wtd_std_fie, std_fie  → keep: wtd_std_fie
+# Singletons (not much correlation): wtd_entropy_FusionHeat, gmean_Density, range_atomic_mass
+
 lr2_features <- c(
-  "wtd_mean_Valence",            # Valence location — 1 of 4 (r≈0.99)
-  "wtd_std_ThermalConductivity", # TC spread        — 1 of 3 (r≈0.96-0.99)
-  "range_atomic_radius",         # atomic_radius spread — 1 of 4 (r≈0.87-0.97)
-  "wtd_entropy_Valence",         # Entropy group    — 2 of 4 (r≈0.90-0.96)
+  "wtd_mean_Valence",            # Valence location
+  "wtd_std_ThermalConductivity", # TC spread
+  "range_atomic_radius",         # atomic_radius spread
+  "wtd_entropy_Valence",         # Entropy group
   "wtd_entropy_atomic_mass",
-  "wtd_std_fie",                 # fie spread       — 1 of 3 (r≈0.87+)
+  "wtd_std_fie",                 # fie spread
   "wtd_entropy_FusionHeat",      # singleton
   "gmean_Density",               # singleton
   "range_atomic_mass"            # singleton
