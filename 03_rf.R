@@ -12,6 +12,7 @@ load("prepared_data.RData")
 # MODEL 3: RANDOM FOREST all numeric features
 # =============================================================================
 
+set.seed(42)
 model_rf <- randomForest(
   tc_class ~ .,
   data       = bind_cols(train_df %>% select(all_of(numeric_predictors)),
@@ -51,17 +52,17 @@ print(confusionMatrix(class_rf2, y_test, positive = "high_tc"))
 
 # ── RF summary ────────────────────────────────────────────────────────────────
 # Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.952     0.881        0.969        0.925          94       0.980
-#  Youden     0.932     0.955        0.926        0.940          36       0.980
+#  0.500      0.951     0.877        0.968        0.923          97       0.980
+#  Youden     0.939     0.947        0.937        0.942          42       0.980
 #
 # RF (Youden) is the better choice for our use case (superconductor discovery / screening):
-# - Sensitivity 0.955 — catches 95.5% of true high_tc materials, missing only 36
-# - Youden threshold recovers 58 additional true superconductors vs default 0.5
-# - Specificity drop (0.969 → 0.926) is acceptable: 140 extra false alarms go to
-#   experimental validation where they are filtered out, but the 58 recovered
+# - Sensitivity 0.947 — catches 94.7% of true high_tc materials, missing only 42
+# - Youden threshold recovers 55 additional true superconductors vs default 0.5
+# - Specificity drop (0.968 → 0.937) is acceptable: 103 extra false alarms go to
+#   experimental validation where they are filtered out, but the 55 recovered
 #   candidates would otherwise be permanently missed
 # - AUC unchanged at 0.980 — threshold shift moves the operating point on the ROC curve
-# ---- Balanced Accuracy improves from 0.925 → 0.940 because Youden maximises Sens+Spec together
+# ---- Balanced Accuracy improves from 0.923 → 0.942 because Youden maximises Sens+Spec together
 
 # ── ROC with Youden point ─────────────────────────────────────────────────────
 plot(roc_rf, main = paste0("ROC — Random Forest (AUC = ", round(auc(roc_rf), 3), ")"))

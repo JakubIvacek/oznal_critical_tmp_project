@@ -13,6 +13,7 @@ load("prepared_data.RData")
 # MODEL 4: DECISION TREE — all numeric features, pruned via cp
 # =============================================================================
 
+set.seed(42)
 model_dt <- rpart(
   tc_class ~ .,
   data    = bind_cols(train_df %>% select(all_of(numeric_predictors)),
@@ -27,8 +28,9 @@ model_dt_pruned <- prune(model_dt, cp = best_cp)
 cat("Best cp:", round(best_cp, 6),
     "| Terminal nodes:", model_dt_pruned$numresp, "\n")
 
+# full pruned tree
 rpart.plot(model_dt_pruned, type = 4, extra = 104,
-           main = "Decision Tree (pruned)")
+           main = "Decision Tree")
 print(model_dt_pruned)
 
 # ── threshold 0.5 ──
@@ -67,8 +69,8 @@ legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = 
 
 # ── DT summary ────────────────────────────────────────────────────────────────
 # Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.924     0.808        0.952        0.880         152       0.955
-#  Youden     0.902     0.908        0.901        0.904          73       0.955
+#  0.500      0.924     0.800        0.954        0.877         158       0.955
+#  Youden     0.902     0.906        0.901        0.904          74       0.955
 
 # ── Explainability & feature-space benefits ───────────────────────────────────
 # Explainability: DT is highly interpretable — tree diagram directly
