@@ -109,3 +109,16 @@ points(
   pch = 19, col = "red", cex = 1.5
 )
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+
+# ── Explainability & feature-space benefits ───────────────────────────────────
+# Explainability: LR is the most interpretable model — each coefficient directly
+# gives the log-odds change per unit increase in a feature. p-values and
+# confidence intervals provide formal significance tests.
+#
+# Feature-space (top20_eda, 20 features):
+#   Benefit: retains maximum signal from EDA screening.
+#   Cost: collinearity inflates std. errors — 2 features non-significant in this selection (mean_Valence, gmean_Valence).
+#
+# Feature-space (lr2_features, 9 features):
+#   Benefit: all coefficients stable and significant — clean, trustworthy interpretation.
+#   Cost: AUC drop (0.921 vs 0.928) from discarding redundant features but worth for interpretability and stability.

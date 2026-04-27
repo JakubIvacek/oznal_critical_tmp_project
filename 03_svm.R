@@ -67,3 +67,11 @@ points(
   pch = 19, col = "red", cex = 1.5
 )
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+
+# ── Explainability & feature-space benefits ───────────────────────────────────
+# Explainability: SVM is the least interpretable model — RBF kernel maps data
+# into an implicit high-dimensional space. No feature coefficients exist.
+#
+# Feature-space (lr2_features, 9 features):
+#   Benefit: collinearity removed — SVM margin estimation is more stable.
+#   SVM maximises the margin between classes; correlated features can distort it.

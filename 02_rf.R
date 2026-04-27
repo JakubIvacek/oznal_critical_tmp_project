@@ -71,3 +71,40 @@ points(
   pch = 19, col = "red", cex = 1.5
 )
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+
+
+
+# ── Feature importance BETWEEN RF from all features and selected by EDA ─────
+imp_df <- importance(fit_rf) %>%
+  as.data.frame() %>%
+  rownames_to_column("feature") %>%
+  arrange(desc(MeanDecreaseGini))
+
+top20_rf  <- imp_df %>% slice_head(n = 20) %>% pull(feature)
+
+cat("\n── Top 20 RF (MeanDecreaseGini) vs Top 20 EDA (SMD) ──\n")
+print(data.frame(rank = 1:20, RF_importance = top20_rf, EDA_smd = top20_eda))
+cat("\nUnique to RF (not in EDA top 20):", paste(setdiff(top20_rf, top20_eda), collapse = ", "), "\n")
+cat("Unique to EDA (not in RF top 20):", paste(setdiff(top20_eda, top20_rf), collapse = ", "), "\n")
+
+# Unique to RF:  wtd_std_Valence, wtd_range_Valence, wtd_mean_ThermalConductivity,
+#                wtd_std_ElectronAffinity, std_atomic_mass, wtd_entropy_ThermalConductivity,
+#                wtd_range_ThermalConductivity, wtd_gmean_ElectronAffinity,
+#                wtd_gmean_ThermalConductivity, wtd_std_atomic_mass
+# Unique to EDA: mean_Valence, range_fie, wtd_std_atomic_radius, gmean_Valence,
+#                std_atomic_radius, entropy_Valence, wtd_std_fie, std_fie,
+#                gmean_Density, range_atomic_mass
+# Shared (10):   wtd_std_ThermalConductivity, range_ThermalConductivity, std_ThermalConductivity,
+#                range_atomic_radius, wtd_mean_Valence, wtd_gmean_Valence,
+#                wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_FusionHeat,
+#                wtd_entropy_atomic_radius
+
+# ── Explainability & feature-space benefits ───────────────────────────────────
+# Explainability: RF is partially interpretable — MeanDecreaseGini ranks feature
+# importance globally but gives no directional effect. We cannot say directly
+# "higher wtd_mean_Valence → more likely high_tc" from importance alone.
+#
+# Feature-space approach (all 81 numeric features):
+#   Benefit: RF handles collinearity natively via random feature subsampling per split.
+#   Retaining all features allows the forest to exploit weak signals not captured by EDA.
+#   Cost: no coefficient interpretation — model is a black box at the individual level.
