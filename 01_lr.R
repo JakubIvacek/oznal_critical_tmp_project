@@ -50,6 +50,14 @@ print(confusionMatrix(class_lra_y, y_test, positive = "high_tc"))
 # 2 features non-significant (mean_Valence, gmean_Valence) — collinearity inflates std.errors.
 # ---- Balanced Accuracy improves from 0.780 → 0.873 with Youden threshold.
 
+# ── ROC with Youden point ────────────────────────────────────────────────
+plot(roc_lr, main = paste0("ROC — (20 features)  (AUC = ", round(auc(roc_lr), 3), ")"))
+points(
+  x   = measure_lra$SPEC[which.max(youden_lra)],
+  y   = measure_lra$SENS[which.max(youden_lra)],
+  pch = 19, col = "red", cex = 1.5
+)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 
 
 # =============================================================================
@@ -92,3 +100,12 @@ print(confusionMatrix(class_lrb_y, y_test, positive = "high_tc"))
 # LR-B Youden is the best linear model for discovery: sensitivity 0.970, missing only 24.
 # All 9 coefficients stable and significant — collinearity resolved and reduced features.
 # ---- Balanced Accuracy improves from 0.771 → 0.867 with Youden threshold.
+
+# ── ROC with Youden point ────────────────────────────────────────────────
+plot(roc_lr2, main = paste0("ROC — (9 features)  (AUC = ", round(auc(roc_lr2), 3), ")"))
+points(
+  x   = measure_lrb$SPEC[which.max(youden_lrb)],
+  y   = measure_lrb$SENS[which.max(youden_lrb)],
+  pch = 19, col = "red", cex = 1.5
+)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")

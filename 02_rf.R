@@ -62,3 +62,12 @@ print(confusionMatrix(class_rf2, y_test, positive = "high_tc"))
 #   candidates would otherwise be permanently missed
 # - AUC unchanged at 0.980 — threshold shift moves the operating point on the ROC curve
 # ---- Balanced Accuracy improves from 0.925 → 0.940 because Youden maximises Sens+Spec together
+
+# ── ROC with Youden point ─────────────────────────────────────────────────────
+plot(roc_rf, main = paste0("ROC — Random Forest (AUC = ", round(auc(roc_rf), 3), ")"))
+points(
+  x   = measure_rf$SPEC[best_idx_rf],
+  y   = measure_rf$SENS[best_idx_rf],
+  pch = 19, col = "red", cex = 1.5
+)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
