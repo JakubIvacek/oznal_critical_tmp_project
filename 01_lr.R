@@ -12,17 +12,17 @@ load("prepared_data.RData")
 # MODEL 1a: LOGISTIC REGRESSION — 20 top features (all shortlisted)
 # =============================================================================
 
-fit_lr <- glm(
+model_lr <- glm(
   tc_class ~ .,
   data   = bind_cols(train_df %>% select(all_of(top20_eda)), tc_class = y_train),
   family = binomial(link = "logit")
 )
-cat("\nLR-A converged:", fit_lr$converged, "\n")
-print(tidy(fit_lr), n = 21)
+cat("\nLR-A converged:", model_lr$converged, "\n")
+print(tidy(model_lr), n = 21)
 # Non-significant (p > 0.05): mean_Valence (p=0.176), gmean_Valence (p=0.756)
 
 # ── threshold 0.5 ──
-prob_lr  <- predict(fit_lr, newdata = test_df %>% select(all_of(top20_eda)), type = "response")
+prob_lr  <- predict(model_lr, newdata = test_df %>% select(all_of(top20_eda)), type = "response")
 class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
 print(confusionMatrix(class_lr, y_test, positive = "high_tc"))
 roc_lr <- roc(y_test, prob_lr, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
@@ -65,16 +65,16 @@ legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = 
 # =============================================================================
 
 
-fit_lr2 <- glm(
+model_lr2 <- glm(
   tc_class ~ .,
   data   = bind_cols(train_df %>% select(all_of(lr2_features)), tc_class = y_train),
   family = binomial(link = "logit")
 )
-cat("\nLR-B converged:", fit_lr2$converged, "\n")
-print(tidy(fit_lr2), n = length(lr2_features) + 1)
+cat("\nLR-B converged:", model_lr2$converged, "\n")
+print(tidy(model_lr2), n = length(lr2_features) + 1)
 
 # ── LR-B threshold 0.5 ──
-prob_lr2  <- predict(fit_lr2, newdata = test_df %>% select(all_of(lr2_features)), type = "response")
+prob_lr2  <- predict(model_lr2, newdata = test_df %>% select(all_of(lr2_features)), type = "response")
 class_lr2 <- factor(if_else(prob_lr2 >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
 print(confusionMatrix(class_lr2, y_test, positive = "high_tc"))
 roc_lr2 <- roc(y_test, prob_lr2, levels = c("non_high_tc", "high_tc"), quiet = TRUE)

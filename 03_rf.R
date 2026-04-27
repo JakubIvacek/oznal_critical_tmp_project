@@ -9,10 +9,10 @@ load("prepared_data.RData")
 # Loaded: train_df, test_df, y_train, y_test, numeric_predictors
 
 # =============================================================================
-# MODEL 2: RANDOM FOREST all numeric features
+# MODEL 3: RANDOM FOREST all numeric features
 # =============================================================================
 
-fit_rf <- randomForest(
+model_rf <- randomForest(
   tc_class ~ .,
   data       = bind_cols(train_df %>% select(all_of(numeric_predictors)),
                          tc_class = y_train),
@@ -21,10 +21,10 @@ fit_rf <- randomForest(
   importance = TRUE
 )
 # OOB sampling gives an unbiased estimate of test error without a separate validation set.
-cat("RF OOB error:", round(fit_rf$err.rate[500, "OOB"], 4), "\n")
+cat("RF OOB error:", round(model_rf$err.rate[500, "OOB"], 4), "\n")
 
-class_rf <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predictors)))
-prob_rf  <- predict(fit_rf, newdata = test_df %>% select(all_of(numeric_predictors)),
+class_rf <- predict(model_rf, newdata = test_df %>% select(all_of(numeric_predictors)))
+prob_rf  <- predict(model_rf, newdata = test_df %>% select(all_of(numeric_predictors)),
                     type = "prob")[, "high_tc"]
 
 print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
@@ -75,7 +75,7 @@ legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = 
 
 
 # ── Feature importance BETWEEN RF from all features and selected by EDA ─────
-imp_df <- importance(fit_rf) %>%
+imp_df <- importance(model_rf) %>%
   as.data.frame() %>%
   rownames_to_column("feature") %>%
   arrange(desc(MeanDecreaseGini))
@@ -102,7 +102,7 @@ cat("Unique to EDA (not in RF top 20):", paste(setdiff(top20_eda, top20_rf), col
 # ── Explainability & feature-space benefits ───────────────────────────────────
 # Explainability: RF is partially interpretable — MeanDecreaseGini ranks feature
 # importance globally but gives no directional effect. We cannot say directly
-# "higher wtd_mean_Valence → more likely high_tc" from importance alone.
+# "higher wtd_mean_Valence → more likely high_tc" from importance alone only if the feature is important.
 #
 # Feature-space approach (all 81 numeric features):
 #   Benefit: RF handles collinearity natively via random feature subsampling per split.
