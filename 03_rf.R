@@ -1,8 +1,9 @@
 library(tidyverse)
 library(randomForest)
-library(caret)        
-library(pROC)         
-library(ROCit)       
+library(caret)
+library(pROC)
+library(ROCit)
+library(MLmetrics)
 
 
 load("prepared_data.RData")
@@ -30,6 +31,8 @@ prob_rf  <- predict(model_rf, newdata = test_df %>% select(all_of(numeric_predic
 
 print(confusionMatrix(class_rf, y_test, positive = "high_tc"))
 
+cat("F1 (0.5):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_rf, positive = "high_tc"), 3), "\n")
+
 roc_rf <- roc(y_test, prob_rf, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 
 
@@ -49,11 +52,12 @@ class_rf2 <- factor(
 )
 print(confusionMatrix(class_rf2, y_test, positive = "high_tc"))
 
+cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_rf2, positive = "high_tc"), 3), "\n")
 
 # ── RF summary ────────────────────────────────────────────────────────────────
-# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.951     0.877        0.968        0.923          97       0.980
-#  Youden     0.939     0.947        0.937        0.942          42       0.980
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.951     0.877        0.968        0.923          97        0.874  0.980
+#  Youden     0.939     0.947        0.937        0.942          42        0.857  0.980
 #
 # RF (Youden) is the better choice for our use case (superconductor discovery / screening):
 # - Sensitivity 0.947 — catches 94.7% of true high_tc materials, missing only 42
@@ -72,6 +76,17 @@ points(
   pch = 19, col = "red", cex = 1.5
 )
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+
+# ── Explainability & feature-space benefits ───────────────────────────────────
+# Explainability: RF is partially interpretable — MeanDecreaseGini ranks feature
+# importance globally but gives no directional effect. We cannot say directly
+# "higher wtd_mean_Valence → more likely high_tc" from importance alone only if the feature is important.
+#
+# Feature-space approach (all 81 numeric features):
+#   Benefit: RF handles collinearity natively via random feature subsampling per split.
+#   Retaining all features allows the forest to exploit weak signals not captured by EDA.
+#   Cost: no coefficient interpretation — model is a black box at the individual level.
+
 
 
 
@@ -100,12 +115,3 @@ cat("Unique to EDA (not in RF top 20):", paste(setdiff(top20_eda, top20_rf), col
 #                wtd_entropy_atomic_mass, wtd_entropy_Valence, wtd_entropy_FusionHeat,
 #                wtd_entropy_atomic_radius
 
-# ── Explainability & feature-space benefits ───────────────────────────────────
-# Explainability: RF is partially interpretable — MeanDecreaseGini ranks feature
-# importance globally but gives no directional effect. We cannot say directly
-# "higher wtd_mean_Valence → more likely high_tc" from importance alone only if the feature is important.
-#
-# Feature-space approach (all 81 numeric features):
-#   Benefit: RF handles collinearity natively via random feature subsampling per split.
-#   Retaining all features allows the forest to exploit weak signals not captured by EDA.
-#   Cost: no coefficient interpretation — model is a black box at the individual level.

@@ -3,6 +3,7 @@ library(e1071)
 library(caret)
 library(pROC)
 library(ROCit)
+library(MLmetrics)
 
 
 load("prepared_data.RData")
@@ -33,6 +34,8 @@ class_svm_a <- factor(if_else(prob_svm_a >= 0.5, "high_tc", "non_high_tc"),
                       levels = levels(y_train))
 print(confusionMatrix(class_svm_a, y_test, positive = "high_tc"))
 
+cat("F1 (0.5):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_svm_a, positive = "high_tc"), 3), "\n")
+
 roc_svm_a <- roc(y_test, prob_svm_a, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_svm_a, main = paste0("ROC — SVM-A (20 feat)  (AUC = ", round(auc(roc_svm_a), 3), ")"))
 
@@ -48,6 +51,8 @@ class_svm_a_y <- factor(if_else(prob_svm_a >= opt_cutoff_svm_a, "high_tc", "non_
                         levels = levels(y_train))
 print(confusionMatrix(class_svm_a_y, y_test, positive = "high_tc"))
 
+cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_svm_a_y, positive = "high_tc"), 3), "\n")
+
 # ── SVM-A ROC with Youden point ───────────────────────────────────────────────
 plot(roc_svm_a, main = paste0("ROC — SVM-A (20 feat)  (AUC = ", round(auc(roc_svm_a), 3), ")"))
 points(
@@ -58,9 +63,9 @@ points(
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 
 # ── SVM-A summary ─────────────────────────────────────────────────────────────
-# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.867     0.564        0.940        0.752         345       0.916
-#  Youden     0.828     0.938        0.801        0.870          49       0.916
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.867     0.564        0.940        0.752         345        0.623  0.916
+#  Youden     0.828     0.938        0.801        0.870          49        0.680  0.916
 
 
 # =============================================================================
@@ -87,6 +92,8 @@ class_svm_b <- factor(if_else(prob_svm_b >= 0.5, "high_tc", "non_high_tc"),
                       levels = levels(y_train))
 print(confusionMatrix(class_svm_b, y_test, positive = "high_tc"))
 
+cat("F1 (0.5):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_svm_b, positive = "high_tc"), 3), "\n")
+
 roc_svm_b <- roc(y_test, prob_svm_b, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_svm_b, main = paste0("ROC — SVM-B (9 feat)  (AUC = ", round(auc(roc_svm_b), 3), ")"))
 
@@ -102,6 +109,8 @@ class_svm_b_y <- factor(if_else(prob_svm_b >= opt_cutoff_svm_b, "high_tc", "non_
                         levels = levels(y_train))
 print(confusionMatrix(class_svm_b_y, y_test, positive = "high_tc"))
 
+cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_svm_b_y, positive = "high_tc"), 3), "\n")
+
 # ── SVM-B ROC with Youden point ───────────────────────────────────────────────
 plot(roc_svm_b, main = paste0("ROC — SVM-B (9 feat)  (AUC = ", round(auc(roc_svm_b), 3), ")"))
 points(
@@ -112,9 +121,9 @@ points(
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 
 # ── SVM-B summary ─────────────────────────────────────────────────────────────
-# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.864     0.589        0.930        0.760         325       0.926
-#  Youden     0.836     0.929        0.813        0.871          56       0.926
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.864     0.589        0.930        0.760         325        0.627  0.926
+#  Youden     0.836     0.929        0.813        0.871          56        0.688  0.926
 #
 # SVM-B Youden recovers 269 additional superconductors vs default 0.5 threshold.
 # AUC 0.926 — comparable to LR-B (0.921), weaker than RF (0.980).

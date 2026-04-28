@@ -4,6 +4,7 @@ library(rpart.plot)
 library(caret)
 library(pROC)
 library(ROCit)
+library(MLmetrics)
 
 
 load("prepared_data.RData")
@@ -41,6 +42,8 @@ class_dt <- factor(if_else(prob_dt >= 0.5, "high_tc", "non_high_tc"),
                    levels = levels(y_train))
 print(confusionMatrix(class_dt, y_test, positive = "high_tc"))
 
+cat("F1 (0.5):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_dt, positive = "high_tc"), 3), "\n")
+
 roc_dt <- roc(y_test, prob_dt, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_dt, main = paste0("ROC — Decision Tree (AUC = ", round(auc(roc_dt), 3), ")"))
 
@@ -58,6 +61,8 @@ class_dt_y <- factor(if_else(prob_dt >= opt_cutoff_dt, "high_tc", "non_high_tc")
                      levels = levels(y_train))
 print(confusionMatrix(class_dt_y, y_test, positive = "high_tc"))
 
+cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_dt_y, positive = "high_tc"), 3), "\n")
+
 # ── ROC with Youden point ─────────────────────────────────────────────────────
 plot(roc_dt, main = paste0("ROC — Decision Tree (AUC = ", round(auc(roc_dt), 3), ")"))
 points(
@@ -68,9 +73,9 @@ points(
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 
 # ── DT summary ────────────────────────────────────────────────────────────────
-# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.924     0.800        0.954        0.877         158       0.955
-#  Youden     0.902     0.906        0.901        0.904          74       0.955
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.924     0.800        0.954        0.877         158        0.803  0.955
+#  Youden     0.902     0.906        0.901        0.904          74        0.784  0.955
 
 # ── Explainability & feature-space benefits ───────────────────────────────────
 # Explainability: DT is highly interpretable — tree diagram directly
@@ -79,9 +84,8 @@ legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = 
 # and SVM (no kernel), b,ut less statistically formal than LR (no p-values or confidence intervals).
 #
 # Feature-space (all 81 numeric features):
-#   Benefit: DT performs built-in feature selection — only splits on features
-#   that reduce Gini impurity. Collinearity is not a problem since the tree
+#   Collinearity is not a problem since the tree
 #   picks one feature per split greedily, ignoring redundant ones.
-#   Cost: single tree is prone to overfitting — pruning via cp is required.
+#   Cost: single tree is prone to overfitting — pruning via cp in our model.
 #   AUC 0.955 is lower than RF (0.980) because RF averages 500 trees,
-#   reducing variance that a single tree cannot avoid.
+#   reducing variance that a single tree has.

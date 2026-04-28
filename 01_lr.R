@@ -1,8 +1,9 @@
 library(tidyverse)
-library(caret)   
-library(pROC)    
-library(broom)  
-library(ROCit)   
+library(caret)
+library(pROC)
+library(broom)
+library(ROCit)
+library(MLmetrics)
 
 
 load("prepared_data.RData")
@@ -25,6 +26,9 @@ print(tidy(model_lr), n = 21)
 prob_lr  <- predict(model_lr, newdata = test_df %>% select(all_of(top20_eda)), type = "response")
 class_lr <- factor(if_else(prob_lr >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
 print(confusionMatrix(class_lr, y_test, positive = "high_tc"))
+
+cat("F1 (0.5):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_lr, positive = "high_tc"), 3), "\n")
+
 roc_lr <- roc(y_test, prob_lr, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_lr, main = paste0("ROC — LR-A (20 feat)  (AUC = ", round(auc(roc_lr), 3), ")"))
 
@@ -39,11 +43,12 @@ cat("LR-A Youden cutoff:", round(opt_cutoff_lra, 4),
 class_lra_y <- factor(if_else(prob_lr >= opt_cutoff_lra, "high_tc", "non_high_tc"),
                       levels = levels(y_train))
 print(confusionMatrix(class_lra_y, y_test, positive = "high_tc"))
+cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_lra_y, positive = "high_tc"), 3), "\n")
 
 # ── LR-A summary ──────────────────────────────────────────────────────────────
-# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.636        0.924        0.780         311       0.928
-#  Youden     0.946        0.799        0.873          43       0.928
+# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.636        0.924        0.780         311        0.632  0.928
+#  Youden     0.946        0.799        0.873          43        0.681  0.928
 #
 # LR-A Youden is preferred for discovery: sensitivity jumps from 0.636 → 0.946,
 # recovering 268 additional true superconductors at the cost of more false alarms.
@@ -77,6 +82,9 @@ print(tidy(model_lr2), n = length(lr2_features) + 1)
 prob_lr2  <- predict(model_lr2, newdata = test_df %>% select(all_of(lr2_features)), type = "response")
 class_lr2 <- factor(if_else(prob_lr2 >= 0.5, "high_tc", "non_high_tc"), levels = levels(y_train))
 print(confusionMatrix(class_lr2, y_test, positive = "high_tc"))
+
+cat("F1 (0.5):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_lr2, positive = "high_tc"), 3), "\n")
+
 roc_lr2 <- roc(y_test, prob_lr2, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
 plot(roc_lr2, main = paste0("ROC — LR-B (9 feat)  (AUC = ", round(auc(roc_lr2), 3), ")"))
 
@@ -92,10 +100,12 @@ class_lrb_y <- factor(if_else(prob_lr2 >= opt_cutoff_lrb, "high_tc", "non_high_t
                       levels = levels(y_train))
 print(confusionMatrix(class_lrb_y, y_test, positive = "high_tc"))
 
+cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_lrb_y, positive = "high_tc"), 3), "\n")
+
 # ── LR-B summary ──────────────────────────────────────────────────────────────
-# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg  AUC
-#  0.500      0.607        0.935        0.771         311       0.921
-#  Youden     0.970        0.764        0.867          24       0.921
+# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.607        0.935        0.771         311        0.647  0.921
+#  Youden     0.970        0.764        0.867          24        0.659  0.921
 #
 # LR-B Youden is the best linear model for discovery: sensitivity 0.970, missing only 24.
 # All 9 coefficients stable and significant — collinearity resolved and reduced features.
