@@ -46,14 +46,14 @@ print(confusionMatrix(class_lra_y, y_test, positive = "high_tc"))
 cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_lra_y, positive = "high_tc"), 3), "\n")
 
 # ── LR-A summary ──────────────────────────────────────────────────────────────
-# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
-#  0.500      0.636        0.924        0.780         311        0.632  0.928
-#  Youden     0.946        0.799        0.873          43        0.681  0.928
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.871     0.642        0.927        0.784         283        0.661  0.928
+#  Youden     0.828     0.946        0.799        0.872          43        0.682  0.928
 #
-# LR-A Youden is preferred for discovery: sensitivity jumps from 0.636 → 0.946,
-# recovering 268 additional true superconductors at the cost of more false alarms.
+# LR-A Youden is preferred for discovery: sensitivity jumps from 0.642 → 0.946,
+# recovering 240 additional true superconductors at the cost of more false alarms.
 # 2 features non-significant (mean_Valence, gmean_Valence) — collinearity inflates std.errors.
-# ---- Balanced Accuracy improves from 0.780 → 0.873 with Youden threshold.
+# ---- Balanced Accuracy improves from 0.784 → 0.872 with Youden threshold.
 
 # ── ROC with Youden point ────────────────────────────────────────────────
 plot(roc_lr, main = paste0("ROC — (20 features)  (AUC = ", round(auc(roc_lr), 3), ")"))
@@ -103,9 +103,9 @@ print(confusionMatrix(class_lrb_y, y_test, positive = "high_tc"))
 cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_lrb_y, positive = "high_tc"), 3), "\n")
 
 # ── LR-B summary ──────────────────────────────────────────────────────────────
-# Threshold  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
-#  0.500      0.607        0.935        0.771         311        0.647  0.921
-#  Youden     0.970        0.764        0.867          24        0.659  0.921
+# Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
+#  0.500      0.871     0.607        0.935        0.771         311        0.647  0.921
+#  Youden     0.804     0.970        0.764        0.867          24        0.658  0.921
 #
 # LR-B Youden is the best linear model for discovery: sensitivity 0.970, missing only 24.
 # All 9 coefficients stable and significant — collinearity resolved and reduced features.
