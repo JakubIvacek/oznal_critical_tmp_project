@@ -16,7 +16,7 @@ load("prepared_data.RData")
 model_lr <- glm(
   tc_class ~ .,
   data   = bind_cols(train_df %>% select(all_of(top20_eda)), tc_class = y_train),
-  family = binomial(link = "logit")
+  family = binomial
 )
 cat("\nLR-A converged:", model_lr$converged, "\n")
 print(tidy(model_lr), n = 21)
@@ -73,7 +73,7 @@ legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = 
 model_lr2 <- glm(
   tc_class ~ .,
   data   = bind_cols(train_df %>% select(all_of(lr2_features)), tc_class = y_train),
-  family = binomial(link = "logit")
+  family = binomial
 )
 cat("\nLR-B converged:", model_lr2$converged, "\n")
 print(tidy(model_lr2), n = length(lr2_features) + 1)
