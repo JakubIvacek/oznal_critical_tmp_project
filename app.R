@@ -5,6 +5,7 @@ library(pROC)
 library(e1071)
 library(randomForest)
 library(rpart)
+library(rpart.plot)
 library(broom)
 library(MLmetrics)
 library(DT)
@@ -107,6 +108,7 @@ get_metrics_row <- function(probs, truth, thr, model_name) {
     Specificity = round(unname(cm$byClass["Specificity"]), 3),
     `Bal.Acc`   = round(unname(cm$byClass["Balanced Accuracy"]), 3),
     F1          = round(unname(cm$byClass["F1"]), 3),
+    TP          = cm$table["high_tc", "high_tc"],
     FN          = cm$table["non_high_tc", "high_tc"],
     FP          = cm$table["high_tc", "non_high_tc"]
   )
@@ -147,19 +149,17 @@ ui <- fluidPage(
     tabPanel("Model Comparison",
       sidebarLayout(
         sidebarPanel(width = 3,
+          h5("Select model"),
+          selectInput("cmp_model", NULL, choices = MODEL_NAMES, selected = "Random Forest"),
+          hr(),
           h5("Classification threshold"),
           sliderInput("cmp_thr", NULL, 0.01, 0.99, 0.5, 0.01),
-          actionButton("cmp_reset", "Reset to 0.5", class = "btn-sm btn-default"),
-          actionButton("cmp_youden", "Set Youden threshold", class = "btn-sm btn-info"),
-          selectInput("cmp_youden_model", "Youden for model:",
-                      choices = MODEL_NAMES, selected = "Random Forest"),
-          hr(),
-          h5("ROC curves to show"),
-          checkboxGroupInput("cmp_show", NULL,
-                             choices = MODEL_NAMES, selected = MODEL_NAMES)
+          actionButton("cmp_reset",  "Reset to 0.5",        class = "btn-sm btn-default"),
+          br(), br(),
+          actionButton("cmp_youden", "Set Youden threshold", class = "btn-sm btn-info")
         ),
         mainPanel(width = 9,
-          h4("Metrics at selected threshold"),
+          h4(textOutput("cmp_model_title")),
           DTOutput("cmp_table"),
           hr(),
           plotOutput("cmp_roc", height = "420px")
@@ -167,7 +167,50 @@ ui <- fluidPage(
       )
     ),
 
-    # ── Tab 3: Feature Importance ─────────────────────────────────────────────
+    # ── Tab 3: Decision Tree Explorer ────────────────────────────────────────
+    tabPanel("Decision Tree",
+      sidebarLayout(
+        sidebarPanel(width = 3,
+          h5("Tree parameters"),
+          sliderInput("dt_cp",       "Complexity (cp):",   0.0001, 0.05, 0.001, 0.0001),
+          sliderInput("dt_maxdepth", "Max depth:",         1, 15, 10, 1),
+          sliderInput("dt_minsplit", "Min split (nodes):", 2, 100, 20, 1),
+          hr(),
+          h5("Classification threshold"),
+          sliderInput("dt_thr", NULL, 0.01, 0.99, 0.5, 0.01),
+          hr()
+        ),
+        mainPanel(width = 9,
+          h4("Decision Tree structure"),
+          plotOutput("dt_plot", height = "500px"),
+          hr(),
+          fluidRow(
+            column(6,
+              h5("Custom tree metrics"),
+              DTOutput("dt_metrics")
+            ),
+            column(6,
+              h5("vs. original pruned DT"),
+              DTOutput("dt_metrics_orig")
+            )
+          )
+        )
+      )
+    ),
+
+    # ── Tab 4: Summary ───────────────────────────────────────────────────────
+    tabPanel("Summary",
+      mainPanel(width = 12,
+        h4("All models at Youden threshold"),
+        p(em("Each model evaluated at its own optimal Youden threshold (maximises sensitivity + specificity).")),
+        DTOutput("sum_table"),
+        hr(),
+        h4("ROC curves with Youden operating points"),
+        plotOutput("sum_roc", height = "480px")
+      )
+    ),
+
+    # ── Tab 5: Feature Importance ─────────────────────────────────────────────
     tabPanel("Feature Importance",
       sidebarLayout(
         sidebarPanel(width = 3,
@@ -258,17 +301,55 @@ server <- function(input, output, session) {
   observeEvent(input$cmp_reset, updateSliderInput(session, "cmp_thr", value = 0.5))
 
   observeEvent(input$cmp_youden, {
-    roc_obj <- all_rocs[[input$cmp_youden_model]]
-    coords  <- pROC::coords(roc_obj, x = "best", best.method = "youden",
-                            ret = "threshold", transpose = FALSE)
-    youden_thr <- round(as.numeric(coords[1]), 2)
-    updateSliderInput(session, "cmp_thr", value = youden_thr)
+    coords     <- pROC::coords(all_rocs[[input$cmp_model]], x = "best",
+                               best.method = "youden", ret = "threshold", transpose = FALSE)
+    updateSliderInput(session, "cmp_thr", value = round(as.numeric(coords[1]), 2))
+  })
+
+  output$cmp_model_title <- renderText({
+    paste("Metrics —", input$cmp_model, "at threshold", input$cmp_thr)
   })
 
   output$cmp_table <- renderDT({
-    thr  <- input$cmp_thr
-    rows <- map_dfr(MODEL_NAMES, ~get_metrics_row(all_probs[[.x]], y_test, thr, .x))
-    datatable(rows, rownames = FALSE, options = list(dom = "t", pageLength = 10)) %>%
+    row <- get_metrics_row(all_probs[[input$cmp_model]], y_test, input$cmp_thr, input$cmp_model)
+    datatable(row, rownames = FALSE, options = list(dom = "t")) %>%
+      formatStyle("AUC", fontWeight = "bold") %>%
+      formatStyle("Sensitivity",
+        color = styleInterval(c(0.8, 0.9), c("black", "darkorange", "darkgreen")))
+  })
+
+  output$cmp_roc <- renderPlot({
+    nm  <- input$cmp_model
+    thr <- input$cmp_thr
+    r   <- all_rocs[[nm]]
+    p   <- all_probs[[nm]]
+    sens_pt <- mean(p[as.character(y_test) == "high_tc"]    >= thr)
+    spec_pt <- mean(p[as.character(y_test) == "non_high_tc"] <  thr)
+    plot(r, main = sprintf("ROC — %s  (AUC = %.3f)", nm, auc(r)),
+         col = MODEL_COLORS[nm], lwd = 2.5)
+    points(spec_pt, sens_pt, pch = 19, col = "black", cex = 1.8)
+    legend("bottomright",
+           legend = c(sprintf("AUC = %.3f", round(as.numeric(auc(r)), 3)),
+                      sprintf("Threshold = %.2f", thr)),
+           col = c(MODEL_COLORS[nm], "black"), lwd = c(2, NA), pch = c(NA, 19),
+           bty = "n", cex = 0.9)
+  })
+
+  # ── Tab 4: Summary ─────────────────────────────────────────────────────────
+  # Precompute Youden threshold and metrics for every model (static)
+  youden_thrs <- setNames(map_dbl(MODEL_NAMES, function(nm) {
+    coords <- pROC::coords(all_rocs[[nm]], x = "best", best.method = "youden",
+                           ret = "threshold", transpose = FALSE)
+    round(as.numeric(coords[1]), 3)
+  }), MODEL_NAMES)
+
+  sum_rows <- map_dfr(MODEL_NAMES, function(nm) {
+    get_metrics_row(all_probs[[nm]], y_test, youden_thrs[[nm]], nm) %>%
+      mutate(Threshold = youden_thrs[[nm]], .after = Model)
+  })
+
+  output$sum_table <- renderDT({
+    datatable(sum_rows, rownames = FALSE, options = list(dom = "t", pageLength = 10)) %>%
       formatStyle("AUC", fontWeight = "bold") %>%
       formatStyle("Sensitivity",
         color = styleInterval(c(0.8, 0.9), c("black", "darkorange", "darkgreen"))) %>%
@@ -277,33 +358,77 @@ server <- function(input, output, session) {
         backgroundColor = styleEqual("Random Forest", "#eaf4fb"))
   })
 
-  output$cmp_roc <- renderPlot({
-    sel <- input$cmp_show
-    if (!length(sel)) return(NULL)
+  output$sum_roc <- renderPlot({
     plot(NA, xlim = c(1, 0), ylim = c(0, 1),
          xlab = "Specificity", ylab = "Sensitivity",
-         main = "ROC Curves — All Models", cex.main = 1.2)
+         main = "ROC Curves — All Models at Youden Threshold", cex.main = 1.2)
     abline(a = 1, b = -1, lty = 2, col = "grey70")
-    for (nm in sel) {
-      r <- all_rocs[[nm]]
+    for (nm in MODEL_NAMES) {
+      r   <- all_rocs[[nm]]
+      thr <- youden_thrs[[nm]]
+      p   <- all_probs[[nm]]
       lines(r$specificities, r$sensitivities, col = MODEL_COLORS[nm], lwd = 2.2)
+      sens_pt <- mean(p[as.character(y_test) == "high_tc"]    >= thr)
+      spec_pt <- mean(p[as.character(y_test) == "non_high_tc"] <  thr)
+      points(spec_pt, sens_pt, pch = 19, col = MODEL_COLORS[nm], cex = 1.6)
     }
-    # Mark operating point at current threshold
-    thr <- input$cmp_thr
-    for (nm in sel) {
-      p    <- all_probs[[nm]]
-      sens <- mean(p[as.character(y_test) == "high_tc"]    >= thr)
-      spec <- mean(p[as.character(y_test) == "non_high_tc"] <  thr)
-      points(spec, sens, pch = 19, col = MODEL_COLORS[nm], cex = 1.4)
-    }
-    aucs <- sapply(sel, function(n) round(as.numeric(auc(all_rocs[[n]])), 3))
+    aucs <- sapply(MODEL_NAMES, function(n) round(as.numeric(auc(all_rocs[[n]])), 3))
     legend("bottomright",
-           legend = sprintf("%-20s  AUC = %.3f", sel, aucs),
-           col = MODEL_COLORS[sel], lwd = 2, bty = "n", cex = 0.82,
-           text.font = 1)
+           legend = sprintf("%-20s  AUC=%.3f  thr=%.3f", MODEL_NAMES, aucs, youden_thrs),
+           col = MODEL_COLORS, lwd = 2, pch = 19, bty = "n", cex = 0.82)
   })
 
-  # ── Tab 3: Feature Importance ──────────────────────────────────────────────
+  # ── Tab 3: Decision Tree Explorer ─────────────────────────────────────────
+  dt_custom <- reactive({
+    raw <- rpart(tc_class ~ ., method = "class",
+      control = rpart.control(
+        cp       = input$dt_cp,
+        maxdepth = input$dt_maxdepth,
+        minsplit = input$dt_minsplit
+      ),
+      data = bind_cols(train_df %>% select(all_of(numeric_predictors)), tc_class = y_train))
+    prune(raw, cp = input$dt_cp)
+  })
+
+  output$dt_plot <- renderPlot({
+    rpart.plot(dt_custom(), type = 4, extra = 104,
+               main = sprintf("DT  cp=%.4f  maxdepth=%d  minsplit=%d",
+                              input$dt_cp, input$dt_maxdepth, input$dt_minsplit),
+               cex = 0.7)
+  })
+
+  dt_metrics_tbl <- function(tree, thr) {
+    prob <- predict(tree, test_df %>% select(all_of(numeric_predictors)), type = "prob")[, "high_tc"]
+    pred <- factor(if_else(prob >= thr, "high_tc", "non_high_tc"), levels = c("non_high_tc", "high_tc"))
+    truth_f <- factor(as.character(y_test), levels = c("non_high_tc", "high_tc"))
+    cm  <- suppressWarnings(confusionMatrix(pred, truth_f, positive = "high_tc"))
+    roc_obj <- roc(y_test, prob, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+    tibble(
+      Metric = c("AUC", "Accuracy", "Sensitivity", "Specificity", "Bal. Acc", "F1", "FN", "FP"),
+      Value  = c(
+        round(as.numeric(auc(roc_obj)), 3),
+        round(unname(cm$overall["Accuracy"]), 3),
+        round(unname(cm$byClass["Sensitivity"]), 3),
+        round(unname(cm$byClass["Specificity"]), 3),
+        round(unname(cm$byClass["Balanced Accuracy"]), 3),
+        round(unname(cm$byClass["F1"]), 3),
+        cm$table["non_high_tc", "high_tc"],
+        cm$table["high_tc", "non_high_tc"]
+      )
+    )
+  }
+
+  output$dt_metrics <- renderDT({
+    datatable(dt_metrics_tbl(dt_custom(), input$dt_thr),
+              rownames = FALSE, options = list(dom = "t", pageLength = 10))
+  })
+
+  output$dt_metrics_orig <- renderDT({
+    datatable(dt_metrics_tbl(model_dt, input$dt_thr),
+              rownames = FALSE, options = list(dom = "t", pageLength = 10))
+  })
+
+  # ── Tab 5: Feature Importance ──────────────────────────────────────────────
   output$fi_rf <- renderPlot({
     imp_df %>%
       slice_head(n = input$fi_n) %>%
