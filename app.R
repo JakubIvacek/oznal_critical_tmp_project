@@ -10,6 +10,8 @@ library(broom)
 library(MLmetrics)
 library(DT)
 library(ROCit)
+library(glmnet)
+library(MASS)
 
 select <- dplyr::select
 
@@ -26,7 +28,7 @@ if (file.exists("fitted_models.RData")) {
   message("Loading cached models ...")
   load("fitted_models.RData")
 } else {
-  message("First run: fitting all models (takes ~4-5 min, cached afterwards) ...")
+  message("First run: fitting all models (takes ~1h, cached afterwards) ...")
   set.seed(42)
 
   model_lr_a <- glm(tc_class ~ ., family = binomial,
@@ -51,10 +53,40 @@ if (file.exists("fitted_models.RData")) {
     data = bind_cols(train_df %>% select(all_of(numeric_predictors)), tc_class = y_train))
   model_dt <- prune(dt_raw, cp = dt_raw$cptable[which.min(dt_raw$cptable[, "xerror"]), "CP"])
 
+  # Task 3 — feature selection models
+  # Prepare matrix form needed by glmnet
+  x_train <- model.matrix(tc_class ~ ., data = bind_cols(
+    train_df %>% select(all_of(numeric_predictors)), tc_class = y_train))[, -1]
+  x_test  <- model.matrix(tc_class ~ ., data = bind_cols(
+    test_df  %>% select(all_of(numeric_predictors)), tc_class = y_test))[, -1]
+  y_train_bin <- as.integer(y_train == "high_tc")
+
+  # Backward stepwise LR
+  lr_full     <- glm(tc_class ~ ., family = binomial(),
+    data = bind_cols(train_df %>% select(all_of(numeric_predictors)), tc_class = y_train))
+  model_backward <- MASS::stepAIC(lr_full, direction = "backward", trace = FALSE)
+
+  # Lasso (lambda.min)
+  cv_lasso    <- cv.glmnet(x_train, y_train_bin, family = "binomial", alpha = 1,
+                           type.measure = "auc")
+  model_lasso <- cv_lasso
+
+  # Elastic Net (best alpha from 0.2, 0.5, 0.8)
+  enet_results <- tibble(alpha = c(0.2, 0.5, 0.8)) %>%
+    mutate(cv_fit  = map(alpha, ~cv.glmnet(x_train, y_train_bin, family = "binomial",
+                                           alpha = .x, type.measure = "auc")),
+           best_auc = map_dbl(cv_fit, ~max(.x$cvm))) %>%
+    arrange(desc(best_auc))
+  model_enet       <- enet_results$cv_fit[[1]]
+  best_enet_alpha  <- enet_results$alpha[[1]]
+
   save(model_lr_a, model_lr_b,
        model_svm_a, preproc_a,
        model_svm_b, preproc_b,
        model_rf, model_dt,
+       model_backward,
+       model_lasso, x_test,
+       model_enet, best_enet_alpha,
        file = "fitted_models.RData")
   message("Models cached to fitted_models.RData — next startup will be instant.")
 }
@@ -66,14 +98,21 @@ prob_svm_a <- attr(predict(model_svm_a, predict(preproc_a, test_df %>% select(al
                            probability = TRUE), "probabilities")[, "high_tc"]
 prob_svm_b <- attr(predict(model_svm_b, predict(preproc_b, test_df %>% select(all_of(lr2_features))),
                            probability = TRUE), "probabilities")[, "high_tc"]
-prob_rf    <- predict(model_rf, test_df %>% select(all_of(numeric_predictors)), type = "prob")[, "high_tc"]
-prob_dt    <- predict(model_dt, test_df %>% select(all_of(numeric_predictors)), type = "prob")[, "high_tc"]
+prob_rf       <- predict(model_rf, test_df %>% select(all_of(numeric_predictors)), type = "prob")[, "high_tc"]
+prob_dt       <- predict(model_dt, test_df %>% select(all_of(numeric_predictors)), type = "prob")[, "high_tc"]
+prob_backward <- predict(model_backward,
+                         newdata = bind_cols(test_df %>% select(all_of(numeric_predictors)), tc_class = y_test),
+                         type = "response")
+prob_lasso    <- as.vector(predict(model_lasso, newx = x_test, s = "lambda.min", type = "response"))
+prob_enet     <- as.vector(predict(model_enet,  newx = x_test, s = "lambda.min", type = "response"))
 
 # ── Shared constants ──────────────────────────────────────────────────────────
 MODEL_NAMES <- c("LR-A (20 feat)", "LR-B (9 feat)", "SVM-A (20 feat)",
-                 "SVM-B (9 feat)", "Random Forest", "Decision Tree")
+                 "SVM-B (9 feat)", "Random Forest", "Decision Tree",
+                 "Backward LR", "Lasso LR", "Elastic Net LR")
 MODEL_COLORS <- setNames(
-  c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628"),
+  c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628",
+    "#1abc9c", "#8e44ad", "#e67e22"),
   MODEL_NAMES
 )
 
@@ -83,7 +122,10 @@ all_probs <- list(
   "SVM-A (20 feat)" = prob_svm_a,
   "SVM-B (9 feat)"  = prob_svm_b,
   "Random Forest"   = prob_rf,
-  "Decision Tree"   = prob_dt
+  "Decision Tree"   = prob_dt,
+  "Backward LR"     = prob_backward,
+  "Lasso LR"        = prob_lasso,
+  "Elastic Net LR"  = prob_enet
 )
 
 all_rocs <- lapply(all_probs, function(p)
@@ -200,13 +242,26 @@ ui <- fluidPage(
 
     # ── Tab 4: Summary ───────────────────────────────────────────────────────
     tabPanel("Summary",
-      mainPanel(width = 12,
-        h4("All models at Youden threshold"),
-        p(em("Each model evaluated at its own optimal Youden threshold (maximises sensitivity + specificity).")),
-        DTOutput("sum_table"),
-        hr(),
-        h4("ROC curves with Youden operating points"),
-        plotOutput("sum_roc", height = "480px")
+      sidebarLayout(
+        sidebarPanel(width = 2,
+          h5("ROC visibility"),
+          checkboxGroupInput("sum_models", NULL,
+            choices  = MODEL_NAMES,
+            selected = MODEL_NAMES
+          ),
+          hr(),
+          actionButton("sum_all",  "Select all",   width = "100%"),
+          br(), br(),
+          actionButton("sum_none", "Deselect all", width = "100%")
+        ),
+        mainPanel(width = 10,
+          h4("All models at Youden threshold"),
+          p(em("Each model evaluated at its own optimal Youden threshold (maximises sensitivity + specificity).")),
+          DTOutput("sum_table"),
+          hr(),
+          h4("ROC curves with Youden operating points"),
+          plotOutput("sum_roc", height = "480px")
+        )
       )
     ),
 
@@ -358,12 +413,17 @@ server <- function(input, output, session) {
         backgroundColor = styleEqual("Random Forest", "#eaf4fb"))
   })
 
+  observeEvent(input$sum_all,  updateCheckboxGroupInput(session, "sum_models", selected = MODEL_NAMES))
+  observeEvent(input$sum_none, updateCheckboxGroupInput(session, "sum_models", selected = character(0)))
+
   output$sum_roc <- renderPlot({
+    visible <- input$sum_models
     plot(NA, xlim = c(1, 0), ylim = c(0, 1),
          xlab = "Specificity", ylab = "Sensitivity",
          main = "ROC Curves — All Models at Youden Threshold", cex.main = 1.2)
     abline(a = 1, b = -1, lty = 2, col = "grey70")
-    for (nm in MODEL_NAMES) {
+    if (length(visible) == 0) return()
+    for (nm in visible) {
       r   <- all_rocs[[nm]]
       thr <- youden_thrs[[nm]]
       p   <- all_probs[[nm]]
@@ -372,10 +432,10 @@ server <- function(input, output, session) {
       spec_pt <- mean(p[as.character(y_test) == "non_high_tc"] <  thr)
       points(spec_pt, sens_pt, pch = 19, col = MODEL_COLORS[nm], cex = 1.6)
     }
-    aucs <- sapply(MODEL_NAMES, function(n) round(as.numeric(auc(all_rocs[[n]])), 3))
+    aucs <- sapply(visible, function(n) round(as.numeric(auc(all_rocs[[n]])), 3))
     legend("bottomright",
-           legend = sprintf("%-20s  AUC=%.3f  thr=%.3f", MODEL_NAMES, aucs, youden_thrs),
-           col = MODEL_COLORS, lwd = 2, pch = 19, bty = "n", cex = 0.82)
+           legend = sprintf("%-20s  AUC=%.3f  thr=%.3f", visible, aucs, youden_thrs[visible]),
+           col = MODEL_COLORS[visible], lwd = 2, pch = 19, bty = "n", cex = 0.82)
   })
 
   # ── Tab 3: Decision Tree Explorer ─────────────────────────────────────────
