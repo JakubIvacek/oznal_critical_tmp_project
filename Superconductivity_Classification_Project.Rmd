@@ -118,6 +118,21 @@ get_youden_cutoff <- function(truth, prob) {
                ret = "threshold", transpose = FALSE) %>%
     as.numeric() %>% first()
 }
+
+plot_cm <- function(truth, prob, threshold, title = "") {
+  pred  <- if_else(prob >= threshold, "high_tc", "non_high_tc") %>%
+    factor(levels = c("non_high_tc", "high_tc"))
+  truth <- factor(truth, levels = c("non_high_tc", "high_tc"))
+  cm    <- confusionMatrix(pred, truth, positive = "high_tc")
+  as.data.frame(cm$table) %>%
+    ggplot(aes(x = Reference, y = Prediction, fill = Freq)) +
+    geom_tile(color = "white", linewidth = 1) +
+    geom_text(aes(label = Freq), size = 7, fontface = "bold") +
+    scale_fill_gradient(low = "white", high = "steelblue") +
+    labs(title = title, x = "Actual", y = "Predicted") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "none")
+}
 ```
 
 ### Logistic Regression
@@ -157,6 +172,11 @@ lr_a_metrics <- bind_rows(lr_a_metrics_05, lr_a_metrics_youden) %>%
   dplyr::select(model, threshold_type, everything())
 
 lr_a_metrics
+```
+
+```{r task1-lr-a-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
+plot_cm(task1_y_test, prob_lr_a, 0.5,       "LR-A  |  threshold 0.5") +
+plot_cm(task1_y_test, prob_lr_a, youden_lr_a, "LR-A  |  Youden threshold")
 ```
 
 ```{r task1-lr-a-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
@@ -208,6 +228,11 @@ lr_b_metrics <- bind_rows(lr_b_metrics_05, lr_b_metrics_youden) %>%
   dplyr::select(model, threshold_type, everything())
 
 lr_b_metrics
+```
+
+```{r task1-lr-b-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
+plot_cm(task1_y_test, prob_lr_b, 0.5,       "LR-B  |  threshold 0.5") +
+plot_cm(task1_y_test, prob_lr_b, youden_lr_b, "LR-B  |  Youden threshold")
 ```
 
 ```{r task1-lr-b-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
@@ -279,6 +304,11 @@ svm_a_metrics <- bind_rows(svm_a_metrics_05, svm_a_metrics_youden) %>%
 svm_a_metrics
 ```
 
+```{r task1-svm-a-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
+plot_cm(task1_y_test, prob_svm_a, 0.5,        "SVM-A  |  threshold 0.5") +
+plot_cm(task1_y_test, prob_svm_a, youden_svm_a, "SVM-A  |  Youden threshold")
+```
+
 ```{r task1-svm-a-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
 roc_svm_a <- pROC::roc(task1_y_test, prob_svm_a,
                        levels = c("non_high_tc", "high_tc"), quiet = TRUE)
@@ -328,6 +358,11 @@ svm_b_metrics <- bind_rows(svm_b_metrics_05, svm_b_metrics_youden) %>%
   dplyr::select(model, threshold_type, everything())
 
 svm_b_metrics
+```
+
+```{r task1-svm-b-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
+plot_cm(task1_y_test, prob_svm_b, 0.5,        "SVM-B  |  threshold 0.5") +
+plot_cm(task1_y_test, prob_svm_b, youden_svm_b, "SVM-B  |  Youden threshold")
 ```
 
 ```{r task1-svm-b-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
@@ -415,6 +450,11 @@ rf_metrics <- bind_rows(rf_metrics_05, rf_metrics_youden) %>%
 rf_metrics
 ```
 
+```{r task1-rf-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
+plot_cm(task1_y_test, prob_rf, 0.5,      "RF  |  threshold 0.5") +
+plot_cm(task1_y_test, prob_rf, youden_rf, "RF  |  Youden threshold")
+```
+
 ```{r task1-rf-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
 roc_rf <- pROC::roc(task1_y_test, prob_rf,
                     levels = c("non_high_tc", "high_tc"), quiet = TRUE)
@@ -498,6 +538,11 @@ dt_metrics <- bind_rows(dt_metrics_05, dt_metrics_youden) %>%
 dt_metrics
 ```
 
+```{r task1-dt-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
+plot_cm(task1_y_test, prob_dt, 0.5,      "DT  |  threshold 0.5") +
+plot_cm(task1_y_test, prob_dt, youden_dt, "DT  |  Youden threshold")
+```
+
 ```{r task1-dt-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
 roc_dt <- pROC::roc(task1_y_test, prob_dt,
                     levels = c("non_high_tc", "high_tc"), quiet = TRUE)
@@ -533,6 +578,15 @@ RF with the Youden threshold is the recommended model — it achieves the highes
 making it most practical for laboratory screening. LR-B with the Youden threshold achieves the highest sensitivity (0.970) and fewest missed superconductors 
 (24 false negatives), but this comes at the cost of a very high false positive count (550 more), meaning many unnecessary experiments.
 For most real-world screening workflows, the we think this trade-off favours RF saving lots of time and resources.
+
+Comparing the features selected by EDA (top 20 by SMD) against the features ranked most important by RF (top 20 by MeanDecreaseGini) reveals an interesting split.
+Ten features appear in both rankings — these are the most robust predictors, capturing signal that is strong regardless of the method used to detect it: 
+`wtd_std_ThermalConductivity`, `range_ThermalConductivity`, `std_ThermalConductivity`, `range_atomic_radius`, `wtd_mean_Valence`, `wtd_gmean_Valence`, 
+`wtd_entropy_atomic_mass`, `wtd_entropy_Valence`, `wtd_entropy_FusionHeat`, and `wtd_entropy_atomic_radius`. The 10 features unique to RF — such as 
+`wtd_std_Valence`, `wtd_mean_ThermalConductivity`, and `wtd_std_ElectronAffinity` — likely gain importance through interactions with other features that only become
+visible inside the ensemble. Tthe 10 EDA-only features such as `mean_Valence`, `gmean_Density`, and `range_fie` separate the classes well in isolation
+but contribute less once the forest already used correlated alternatives. The decision tree, being a single greedy model, selects only the little number of features
+that provide the best and cleanest split — its top splits typically overlap with the core features mentioned, but it ignores the weaker signals that RF leverages across many trees.
 
 ## Scenario 3: Feature Selection Methods
 
