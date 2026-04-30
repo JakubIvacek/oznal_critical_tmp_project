@@ -464,6 +464,7 @@ preproc_a          <- preProcess(task1_train %>% select(all_of(top20_eda)),
 train_svm_a_scaled <- predict(preproc_a, task1_train %>% select(all_of(top20_eda)))
 test_svm_a_scaled  <- predict(preproc_a, task1_test  %>% select(all_of(top20_eda)))
 
+set.seed(42)
 model_svm_a <- svm(
   x           = train_svm_a_scaled,
   y           = task1_y_train,
@@ -520,6 +521,7 @@ preproc_b          <- preProcess(task1_train %>% select(all_of(lr2_features)),
 train_svm_b_scaled <- predict(preproc_b, task1_train %>% select(all_of(lr2_features)))
 test_svm_b_scaled  <- predict(preproc_b, task1_test  %>% select(all_of(lr2_features)))
 
+set.seed(42)
 model_svm_b <- svm(
   x           = train_svm_b_scaled,
   y           = task1_y_train,
@@ -587,6 +589,7 @@ Random forest builds an ensemble method that consists of decision trees, each tr
 Feature importance is measured by mean decrease in Gini impurity (MeanDecreaseGini), which reflects how much each predictor reduces node impurity across all trees.
 
 ```{r task1-rf-fit, message=FALSE, warning=FALSE}
+set.seed(42)
 model_rf <- randomForest(
   tc_class ~ .,
   data       = bind_cols(task1_train %>% select(all_of(numeric_predictors)),
@@ -682,6 +685,7 @@ The model is partially interpretable through feature importance, but no directio
 A single decision tree recursively greedely like RF splits the data on the most informative feature at each node. It is the most directly interpretable model in this scenario — the tree diagram shows the exact decision path for any prediction, with explicit thresholds and feature names at every split. The tree is grown with `cp = 0.001` and then pruned back to the complexity parameter that minimises cross-validated error.
 
 ```{r task1-dt-fit, message=FALSE, warning=FALSE}
+set.seed(42)
 model_dt <- rpart(
   tc_class ~ .,
   data    = bind_cols(task1_train %>% select(all_of(numeric_predictors)),
