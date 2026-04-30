@@ -103,8 +103,16 @@ prob_dt       <- predict(model_dt, test_df %>% select(all_of(numeric_predictors)
 prob_backward <- predict(model_backward,
                          newdata = bind_cols(test_df %>% select(all_of(numeric_predictors)), tc_class = y_test),
                          type = "response")
-prob_lasso    <- as.vector(predict(model_lasso, newx = x_test, s = "lambda.min", type = "response"))
-prob_enet     <- as.vector(predict(model_enet,  newx = x_test, s = "lambda.min", type = "response"))
+# Task 3 — lambda variants for feature selection models
+prob_lasso_min <- as.vector(predict(model_lasso, newx = x_test, s = "lambda.min", type = "response"))
+prob_lasso_1se <- as.vector(predict(model_lasso, newx = x_test, s = "lambda.1se", type = "response"))
+
+prob_enet_min <- as.vector(predict(model_enet, newx = x_test, s = "lambda.min", type = "response"))
+prob_enet_1se <- as.vector(predict(model_enet, newx = x_test, s = "lambda.1se", type = "response"))
+
+# Keep lambda.min as the default version used in the main model comparison
+prob_lasso <- prob_lasso_min
+prob_enet  <- prob_enet_min
 
 # ── Shared constants ──────────────────────────────────────────────────────────
 MODEL_NAMES <- c("LR-A (20 feat)", "LR-B (9 feat)", "SVM-A (20 feat)",
@@ -155,6 +163,191 @@ get_metrics_row <- function(probs, truth, thr, model_name) {
     FP          = cm$table["high_tc", "non_high_tc"]
   )
 }
+
+
+
+
+# ── Task 3: Feature selection helpers ─────────────────────────────────────────
+
+get_basic_metrics <- function(probs, truth, threshold) {
+  pred <- factor(
+    if_else(probs >= threshold, "high_tc", "non_high_tc"),
+    levels = c("non_high_tc", "high_tc")
+  )
+  
+  truth_f <- factor(as.character(truth), levels = c("non_high_tc", "high_tc"))
+  
+  cm <- suppressWarnings(confusionMatrix(pred, truth_f, positive = "high_tc"))
+  roc_obj <- roc(truth_f, probs, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+  
+  tibble(
+    threshold = round(threshold, 3),
+    accuracy = round(unname(cm$overall["Accuracy"]), 3),
+    sensitivity = round(unname(cm$byClass["Sensitivity"]), 3),
+    specificity = round(unname(cm$byClass["Specificity"]), 3),
+    precision = round(unname(cm$byClass["Precision"]), 3),
+    recall = round(unname(cm$byClass["Recall"]), 3),
+    f1 = round(unname(cm$byClass["F1"]), 3),
+    auc = round(as.numeric(auc(roc_obj)), 3)
+  )
+}
+
+get_youden_threshold_basic <- function(probs, truth) {
+  truth_f <- factor(as.character(truth), levels = c("non_high_tc", "high_tc"))
+  
+  roc_obj <- roc(
+    response = truth_f,
+    predictor = probs,
+    levels = c("non_high_tc", "high_tc"),
+    quiet = TRUE
+  )
+  
+  pROC::coords(
+    roc_obj,
+    x = "best",
+    best.method = "youden",
+    ret = "threshold",
+    transpose = FALSE
+  ) %>%
+    as.numeric() %>%
+    first()
+}
+
+get_glmnet_coef_table <- function(model, lambda_type) {
+  coef_mat <- coef(model, s = lambda_type) %>%
+    as.matrix()
+  
+  tibble(
+    feature = rownames(coef_mat),
+    coefficient = as.numeric(coef_mat[, 1])
+  ) %>%
+    filter(feature != "(Intercept)", coefficient != 0) %>%
+    mutate(abs_coefficient = abs(coefficient)) %>%
+    arrange(feature)
+}
+
+get_backward_coef_table <- function(model) {
+  broom::tidy(model) %>%
+    filter(term != "(Intercept)") %>%
+    transmute(
+      feature = term,
+      coefficient = estimate,
+      abs_coefficient = abs(estimate)
+    ) %>%
+    arrange(feature)
+}
+
+get_feature_selection_summary <- function() {
+  fs_summary_base <- tibble(
+    method = c(
+      "Backward LR",
+      "Lasso LR",
+      "Lasso LR",
+      paste0("Elastic Net LR alpha=", best_enet_alpha),
+      paste0("Elastic Net LR alpha=", best_enet_alpha)
+    ),
+    selection_setting = c(
+      "AIC",
+      "lambda.min",
+      "lambda.1se",
+      "lambda.min",
+      "lambda.1se"
+    ),
+    probs = list(
+      prob_backward,
+      prob_lasso_min,
+      prob_lasso_1se,
+      prob_enet_min,
+      prob_enet_1se
+    ),
+    retained_features = c(
+      nrow(get_backward_coef_table(model_backward)),
+      nrow(get_glmnet_coef_table(model_lasso, "lambda.min")),
+      nrow(get_glmnet_coef_table(model_lasso, "lambda.1se")),
+      nrow(get_glmnet_coef_table(model_enet, "lambda.min")),
+      nrow(get_glmnet_coef_table(model_enet, "lambda.1se"))
+    )
+  )
+  
+  fs_summary_base %>%
+    mutate(
+      youden_threshold = map_dbl(
+        probs,
+        ~ get_youden_threshold_basic(.x, y_test)
+      ),
+      metrics_05 = map(
+        probs,
+        ~ get_basic_metrics(.x, y_test, threshold = 0.5) %>%
+          mutate(threshold_type = "0.5", .before = threshold)
+      ),
+      metrics_youden = map2(
+        probs,
+        youden_threshold,
+        ~ get_basic_metrics(.x, y_test, threshold = .y) %>%
+          mutate(threshold_type = "Youden", .before = threshold)
+      ),
+      metrics = map2(metrics_05, metrics_youden, bind_rows)
+    ) %>%
+    select(
+      method,
+      selection_setting,
+      retained_features,
+      metrics
+    ) %>%
+    unnest(metrics) %>%
+    select(
+      method,
+      selection_setting,
+      retained_features,
+      threshold_type,
+      threshold,
+      accuracy,
+      sensitivity,
+      specificity,
+      precision,
+      recall,
+      f1,
+      auc
+    ) %>%
+    mutate(across(where(is.numeric), ~ round(.x, 3)))
+}
+
+get_feature_selection_matrix <- function() {
+  feature_lists <- list(
+    "Backward LR" = get_backward_coef_table(model_backward)$feature,
+    "Lasso - lambda.min" = get_glmnet_coef_table(model_lasso, "lambda.min")$feature,
+    "Lasso - lambda.1se" = get_glmnet_coef_table(model_lasso, "lambda.1se")$feature,
+    "Elastic Net - lambda.min" = get_glmnet_coef_table(model_enet, "lambda.min")$feature,
+    "Elastic Net - lambda.1se" = get_glmnet_coef_table(model_enet, "lambda.1se")$feature
+  )
+  
+  tibble(feature = sort(numeric_predictors)) %>%
+    mutate(
+      `Backward LR` = feature %in% feature_lists[["Backward LR"]],
+      `Lasso - lambda.min` = feature %in% feature_lists[["Lasso - lambda.min"]],
+      `Lasso - lambda.1se` = feature %in% feature_lists[["Lasso - lambda.1se"]],
+      `Elastic Net - lambda.min` = feature %in% feature_lists[["Elastic Net - lambda.min"]],
+      `Elastic Net - lambda.1se` = feature %in% feature_lists[["Elastic Net - lambda.1se"]]
+    ) %>%
+    mutate(
+      retained_count = rowSums(
+        across(
+          c(
+            `Backward LR`,
+            `Lasso - lambda.min`,
+            `Lasso - lambda.1se`,
+            `Elastic Net - lambda.min`,
+            `Elastic Net - lambda.1se`
+          ),
+          ~ as.integer(.x)
+        )
+      ),
+      .after = feature
+    ) %>%
+    arrange(desc(retained_count), feature)
+}
+
+
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 ui <- fluidPage(
@@ -288,6 +481,28 @@ ui <- fluidPage(
           plotOutput("sum_roc", height = "480px")
         )
       )
+    ),
+    
+    
+    # ── Tab 5: Feature Selection ───────────────────────────────────────────────
+    tabPanel("Feature Selection",
+             fluidRow(
+               column(
+                 width = 12,
+                 h4("Feature selection model performance"),
+                 p("The table compares feature selection methods and settings. Each method is evaluated with both the default 0.5 threshold and the Youden threshold."),
+                 DTOutput("fs_metrics_table")
+               )
+             ),
+             hr(),
+             fluidRow(
+               column(
+                 width = 12,
+                 h4("Retained features across feature selection methods"),
+                 p("The table shows whether each feature was retained by each feature selection method. Features retained by more methods are shown first."),
+                 DTOutput("fs_feature_matrix")
+               )
+             )
     ),
 
     # ── Tab 5: Feature Importance ─────────────────────────────────────────────
@@ -547,6 +762,68 @@ server <- function(input, output, session) {
       select(-Model) %>%
       pivot_longer(everything(), names_to = "Metric", values_to = "Value") %>%
       datatable(rownames = FALSE, options = list(dom = "t", pageLength = 15))
+  })
+  
+  # ── Tab 5: Feature Selection ───────────────────────────────────────────────
+  
+  output$fs_metrics_table <- renderDT({
+    fs_summary <- get_feature_selection_summary()
+    
+    datatable(
+      fs_summary,
+      rownames = FALSE,
+      options = list(
+        pageLength = 10,
+        scrollX = TRUE,
+        dom = "tip"
+      )
+    ) %>%
+      formatStyle("auc", fontWeight = "bold") %>%
+      formatStyle(
+        "retained_features",
+        backgroundColor = styleInterval(
+          c(10, 30),
+          c("#eafaf1", "#fff9e6", "#fdecea")
+        )
+      )
+  })
+  
+  output$fs_feature_matrix <- renderDT({
+    fs_matrix <- get_feature_selection_matrix()
+    
+    method_cols <- c(
+      "Backward LR",
+      "Lasso - lambda.min",
+      "Lasso - lambda.1se",
+      "Elastic Net - lambda.min",
+      "Elastic Net - lambda.1se"
+    )
+    
+    datatable(
+      fs_matrix,
+      rownames = FALSE,
+      filter = "top",
+      options = list(
+        pageLength = 25,
+        scrollX = TRUE,
+        dom = "tip"
+      )
+    ) %>%
+      formatStyle(
+        columns = method_cols,
+        backgroundColor = styleEqual(
+          c(TRUE, FALSE),
+          c("#eafaf1", "#fdecea")
+        )
+      ) %>%
+      formatStyle(
+        "retained_count",
+        fontWeight = "bold",
+        backgroundColor = styleInterval(
+          c(0, 2, 4),
+          c("#fdecea", "#fff9e6", "#eafaf1", "#d5f5e3")
+        )
+      )
   })
 
   # ── Tab 6: Feature Importance ──────────────────────────────────────────────
