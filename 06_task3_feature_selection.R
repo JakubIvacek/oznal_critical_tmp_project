@@ -166,8 +166,6 @@ backward_metrics <- bind_rows(
 backward_metrics
 
 
-
-
 # 2. Embedded feature selection: Lasso logistic regression
 
 # Fit cross-validated lasso logistic regression.
@@ -308,7 +306,7 @@ lasso_summary <- bind_rows(
     mutate(
       lambda_type = "lambda.1se",
       retained_features = length(lasso_features_1se)
-    ),
+    )
   
 ) %>%
   dplyr::select(
@@ -549,12 +547,50 @@ task3_summary <- bind_rows(
 task3_summary
 
 
+# =============================================================================
+# Feature retention comparison
+# =============================================================================
+
+feature_retention <- tibble(feature = candidate_features) %>%
+  mutate(
+    backward = feature %in% backward_features,
+    lasso_min = feature %in% lasso_features_min,
+    lasso_1se = feature %in% lasso_features_1se,
+    elastic_net_min = feature %in% enet_features_min,
+    elastic_net_1se = feature %in% enet_features_1se,
+    selected_count = backward + lasso_min + lasso_1se + elastic_net_min + elastic_net_1se
+  ) %>%
+  arrange(desc(selected_count), feature)
+
+feature_retention  
   
+
+
+
+# Features selected by at least 4 out of 5 feature-selection variants
+stable_features <- feature_retention %>%
+  filter(selected_count == 5) %>%
+  arrange(desc(selected_count), feature)
+
+stable_features
   
-  
 
 
+# Number of retained features per method
+feature_selection_counts <- feature_retention %>%
+  summarise(
+    backward = sum(backward),
+    lasso_min = sum(lasso_min),
+    lasso_1se = sum(lasso_1se),
+    elastic_net_min = sum(elastic_net_min),
+    elastic_net_1se = sum(elastic_net_1se)
+  ) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "method",
+    values_to = "retained_features"
+  ) %>%
+  arrange(retained_features)
 
-
-
+feature_selection_counts
 
