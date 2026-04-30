@@ -38,17 +38,23 @@ if (file.exists("fitted_models.RData")) {
     data = bind_cols(train_df %>% select(all_of(lr2_features)), tc_class = y_train))
 
   preproc_a   <- preProcess(train_df %>% select(all_of(top20_eda)), method = c("center","scale"))
+  
+  set.seed(42)
   model_svm_a <- svm(x = predict(preproc_a, train_df %>% select(all_of(top20_eda))),
                      y = y_train, kernel = "radial", probability = TRUE)
 
   preproc_b   <- preProcess(train_df %>% select(all_of(lr2_features)), method = c("center","scale"))
+  
+  set.seed(42)
   model_svm_b <- svm(x = predict(preproc_b, train_df %>% select(all_of(lr2_features))),
                      y = y_train, kernel = "radial", probability = TRUE)
 
-  model_rf <- randomForest(tc_class ~ ., importance = TRUE, ntree = 500,
+  set.seed(42)
+  model_rf <- randomForest(tc_class ~ ., importance = TRUE, ntree = 300,
     mtry = floor(sqrt(length(numeric_predictors))),
     data = bind_cols(train_df %>% select(all_of(numeric_predictors)), tc_class = y_train))
 
+  set.seed(42)
   dt_raw   <- rpart(tc_class ~ ., method = "class", control = rpart.control(cp = 0.001),
     data = bind_cols(train_df %>% select(all_of(numeric_predictors)), tc_class = y_train))
   model_dt <- prune(dt_raw, cp = dt_raw$cptable[which.min(dt_raw$cptable[, "xerror"]), "CP"])
@@ -60,6 +66,13 @@ if (file.exists("fitted_models.RData")) {
   x_test  <- model.matrix(tc_class ~ ., data = bind_cols(
     test_df  %>% select(all_of(numeric_predictors)), tc_class = y_test))[, -1]
   y_train_bin <- as.integer(y_train == "high_tc")
+  
+  # Fixed CV folds for reproducible Lasso and Elastic Net results
+  set.seed(42)
+  
+  foldid_glmnet <- sample(
+    rep(1:10, length.out = nrow(x_train))
+  )
 
   # Backward stepwise LR
   lr_full     <- glm(tc_class ~ ., family = binomial(),
@@ -67,15 +80,32 @@ if (file.exists("fitted_models.RData")) {
   model_backward <- MASS::stepAIC(lr_full, direction = "backward", trace = FALSE)
 
   # Lasso (lambda.min)
-  cv_lasso    <- cv.glmnet(x_train, y_train_bin, family = "binomial", alpha = 1,
-                           type.measure = "auc")
+  cv_lasso <- cv.glmnet(
+    x = x_train,
+    y = y_train_bin,
+    family = "binomial",
+    alpha = 1,
+    type.measure = "auc",
+    foldid = foldid_glmnet
+  )
   model_lasso <- cv_lasso
 
   # Elastic Net (best alpha from 0.2, 0.5, 0.8)
   enet_results <- tibble(alpha = c(0.2, 0.5, 0.8)) %>%
-    mutate(cv_fit  = map(alpha, ~cv.glmnet(x_train, y_train_bin, family = "binomial",
-                                           alpha = .x, type.measure = "auc")),
-           best_auc = map_dbl(cv_fit, ~max(.x$cvm))) %>%
+    mutate(
+      cv_fit = map(
+        alpha,
+        ~ cv.glmnet(
+          x = x_train,
+          y = y_train_bin,
+          family = "binomial",
+          alpha = .x,
+          type.measure = "auc",
+          foldid = foldid_glmnet
+        )
+      ),
+      best_auc = map_dbl(cv_fit, ~ max(.x$cvm))
+    ) %>%
     arrange(desc(best_auc))
   model_enet       <- enet_results$cv_fit[[1]]
   best_enet_alpha  <- enet_results$alpha[[1]]
@@ -85,7 +115,7 @@ if (file.exists("fitted_models.RData")) {
        model_svm_b, preproc_b,
        model_rf, model_dt,
        model_backward,
-       model_lasso, x_test,
+       model_lasso, x_test, foldid_glmnet,
        model_enet, best_enet_alpha,
        file = "fitted_models.RData")
   message("Models cached to fitted_models.RData — next startup will be instant.")
@@ -136,8 +166,9 @@ all_probs <- list(
   "Elastic Net LR"  = prob_enet
 )
 
-all_rocs <- lapply(all_probs, function(p)
-  roc(y_test, p, levels = c("non_high_tc", "high_tc"), quiet = TRUE))
+all_rocs <- lapply(all_probs, function(p) {
+  roc(y_test, p, levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+})
 
 # RF feature importance table
 imp_df <- importance(model_rf) %>%
@@ -318,7 +349,9 @@ get_feature_selection_matrix <- function() {
     "Lasso - lambda.min" = get_glmnet_coef_table(model_lasso, "lambda.min")$feature,
     "Lasso - lambda.1se" = get_glmnet_coef_table(model_lasso, "lambda.1se")$feature,
     "Elastic Net - lambda.min" = get_glmnet_coef_table(model_enet, "lambda.min")$feature,
-    "Elastic Net - lambda.1se" = get_glmnet_coef_table(model_enet, "lambda.1se")$feature
+    "Elastic Net - lambda.1se" = get_glmnet_coef_table(model_enet, "lambda.1se")$feature,
+    "EDA Top 20" = top20_eda,
+    "EDA Top 9" = lr2_features
   )
   
   tibble(feature = sort(numeric_predictors)) %>%
@@ -327,7 +360,9 @@ get_feature_selection_matrix <- function() {
       `Lasso - lambda.min` = feature %in% feature_lists[["Lasso - lambda.min"]],
       `Lasso - lambda.1se` = feature %in% feature_lists[["Lasso - lambda.1se"]],
       `Elastic Net - lambda.min` = feature %in% feature_lists[["Elastic Net - lambda.min"]],
-      `Elastic Net - lambda.1se` = feature %in% feature_lists[["Elastic Net - lambda.1se"]]
+      `Elastic Net - lambda.1se` = feature %in% feature_lists[["Elastic Net - lambda.1se"]],
+      `EDA Top 20` = feature %in% feature_lists[["EDA Top 20"]],
+      `EDA Top 9` = feature %in% feature_lists[["EDA Top 9"]]
     ) %>%
     mutate(
       retained_count = rowSums(
@@ -499,7 +534,7 @@ ui <- fluidPage(
                column(
                  width = 12,
                  h4("Retained features across feature selection methods"),
-                 p("The table shows whether each feature was retained by each feature selection method. Features retained by more methods are shown first."),
+                 p("The table shows whether each feature was retained by model-based feature selection methods and whether it was included in EDA-based feature sets. Features retained by more model-based methods are shown first."),
                  DTOutput("fs_feature_matrix")
                )
              )
@@ -796,7 +831,9 @@ server <- function(input, output, session) {
       "Lasso - lambda.min",
       "Lasso - lambda.1se",
       "Elastic Net - lambda.min",
-      "Elastic Net - lambda.1se"
+      "Elastic Net - lambda.1se",
+      "EDA Top 20",
+      "EDA Top 9"
     )
     
     datatable(
