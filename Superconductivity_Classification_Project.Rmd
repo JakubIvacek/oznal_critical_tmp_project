@@ -5,14 +5,17 @@ output: html_document
 date: "2026-04-30"
 ---
 
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
   warning = FALSE,
   message = FALSE
 )
-
+library(e1071)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(MLmetrics)
 library(tidyverse)
 library(patchwork)
 library(pheatmap)
@@ -21,6 +24,7 @@ library(MASS)
 library(caret)
 library(pROC)
 library(magrittr)
+select <- dplyr::select
 ```
 
 # 1. Introduction
@@ -35,8 +39,6 @@ The main research question is whether high-temperature superconductors can be id
 
 The main hypothesis is that not all available features are equally informative. Therefore, feature selection methods can help identify a smaller and more interpretable subset of variables while preserving good classification performance.
 
-
-
 # 3. Loading Data
 
 ```{r eda-load-data}
@@ -44,8 +46,9 @@ The main hypothesis is that not all available features are equally informative. 
 data_raw <- readr::read_csv("train.csv", show_col_types = FALSE)
 ```
 
-
 ## Exploratory Data Analysis
+
+```{=html}
 <!--
 Write this part in your own words before submission.
 Suggested content:
@@ -53,70 +56,319 @@ Suggested content:
 - The analysis focuses on data quality, target distribution, class balance, predictor screening, redundancy among predictors, and outliers.
 - The plots are selected only when they support modelling decisions, not as an exhaustive visual dump.
 -->
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+```
+
+## Scenario 1: Classification methods
+
+In the first scenario, we compare several classification methods applied to the superconductor dataset. The goal is to evaluate how different classifiers perform at identifying high-temperature superconductors, and whether the choice of feature space affects classification performance.
+
+The compared classification methods are:
+
+-   logistic regression (interpretable linear classifier),
+-   support vector machine with radial kernel (non-linear, margin-based classifier),
+-   random forest (ensemble tree-based classifier),
+-   decision tree (single tree classifier, interpretable).
+
+Two feature spaces are compared for logistic regression and SVM:
+
+-   20 features selected by standardized mean difference during EDA,
+-   9 deduplicated features - highly correlated groups are reduced to one per group.
+
+Random forest and decision tree use the full set of available numerical features.
+
+```{r task1-setup, message=FALSE, warning=FALSE}
+
+set.seed(42)
+load("prepared_data.RData")
+
+task1_train   <- train_df
+task1_test    <- test_df
+task1_y_train <- y_train
+task1_y_test  <- y_test
+```
+
+```{r task1-helpers, message=FALSE, warning=FALSE}
+evaluate_clf <- function(truth, prob, threshold = 0.5) {
+  pred  <- if_else(prob >= threshold, "high_tc", "non_high_tc") %>%
+    factor(levels = c("non_high_tc", "high_tc"))
+  truth <- factor(truth, levels = c("non_high_tc", "high_tc"))
+  cm    <- confusionMatrix(pred, truth, positive = "high_tc")
+  roc_obj <- pROC::roc(response = truth, predictor = prob,
+                       levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+  tibble(
+    threshold    = threshold,
+    accuracy     = unname(cm$overall["Accuracy"]),
+    sensitivity  = unname(cm$byClass["Sensitivity"]),
+    specificity  = unname(cm$byClass["Specificity"]),
+    precision    = unname(cm$byClass["Precision"]),
+    f1           = unname(cm$byClass["F1"]),
+    balanced_acc = unname(cm$byClass["Balanced Accuracy"]),
+    auc          = as.numeric(pROC::auc(roc_obj))
+  )
+}
+
+get_youden_cutoff <- function(truth, prob) {
+  truth <- factor(truth, levels = c("non_high_tc", "high_tc"))
+  roc_obj <- pROC::roc(response = truth, predictor = prob,
+                       levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+  pROC::coords(roc_obj, x = "best", best.method = "youden",
+               ret = "threshold", transpose = FALSE) %>%
+    as.numeric() %>% first()
+}
+```
+
+### Logistic Regression
+
+Logistic regression is the most interpretable model in this scenario. Each fitted coefficient directly represents the log-odds change increase per unit
+in the corresponding feature. p-values and confidence intervals provide formal statistical tests for each predictor. Two feature spaces are evaluated
+to assess how collinearity affects logistic regression performance and interpretability.
+
+#### LR-A: 20 EDA-selected features
+
+The first logistic regression model uses the top 20 features ranked by standardized mean difference (SMD).
+ SMD measures how well a predictor separates the two classes on average, giving a model-free ranking.
+  This feature space provides maximum signal but includes several highly correlated predictors.
+
+```{r task1-lr-a-fit, message=FALSE, warning=FALSE}
+model_lr_a <- glm(
+  tc_class ~ .,
+  data   = bind_cols(task1_train %>% select(all_of(top20_eda)), tc_class = task1_y_train),
+  family = binomial()
+)
+
+cat("LR-A converged:", model_lr_a$converged, "\n")
+cat("LR-A features:", length(top20_eda), "\n")
+```
+
+```{r task1-lr-a-eval, message=FALSE, warning=FALSE}
+prob_lr_a <- predict(model_lr_a,
+                     newdata = task1_test %>% select(all_of(top20_eda)),
+                     type = "response")
+
+lr_a_metrics_05 <- evaluate_clf(task1_y_test, prob_lr_a, threshold = 0.5) %>%
+  mutate(threshold_type = "0.5")
+
+youden_lr_a <- get_youden_cutoff(task1_y_test, prob_lr_a)
+
+lr_a_metrics_youden <- evaluate_clf(task1_y_test, prob_lr_a, threshold = youden_lr_a) %>%
+  mutate(threshold_type = "Youden")
+
+lr_a_metrics <- bind_rows(lr_a_metrics_05, lr_a_metrics_youden) %>%
+  mutate(model = "LR-A (20 feat)") %>%
+  dplyr::select(model, threshold_type, everything())
+
+lr_a_metrics
+```
+
+```{r task1-lr-a-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+roc_lr_a <- pROC::roc(task1_y_test, prob_lr_a,
+                      levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_lr_a,
+     main = paste0("ROC — LR-A (20 features)  AUC = ", round(auc(roc_lr_a), 3)))
+youden_coords_a <- pROC::coords(roc_lr_a, x = "best", best.method = "youden",
+                                ret = c("specificity", "sensitivity"), transpose = FALSE)
+points(youden_coords_a$specificity, youden_coords_a$sensitivity,
+       pch = 19, col = "red", cex = 1.5)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+```
+
+With the default threshold of 0.5, LR-A achieved an accuracy of 0.871 and sensitivity of 0.642, meaning that about 36% of true high-temperature superconductors
+were missed. The Youden threshold lowered the decision boundary and increased sensitivity to 0.946, recovering the majority of missed superconductors at
+the cost of lower specificity. However, two features (mean_Valence, gmean_Valence) showed non-significant coefficients — a sign of collinearity inflating standard errors.
+
+#### LR-B: 9 deduplicated features
+
+The second logistic regression model uses a reduced set of 9 features obtained by removing redundant predictors from the top-20 set.
+ Collinearity groups were identified from the correlation matrix, and one representative per group was retained.
+
+```{r task1-lr-b-fit, message=FALSE, warning=FALSE}
+cat("LR-B features:", length(lr2_features), "\n")
+cat("Features:", paste(lr2_features, collapse = ", "), "\n")
+
+model_lr_b <- glm(
+  tc_class ~ .,
+  data   = bind_cols(task1_train %>% select(all_of(lr2_features)), tc_class = task1_y_train),
+  family = binomial()
+)
+
+cat("LR-B converged:", model_lr_b$converged, "\n")
+```
+
+```{r task1-lr-b-eval, message=FALSE, warning=FALSE}
+prob_lr_b <- predict(model_lr_b,
+                     newdata = task1_test %>% select(all_of(lr2_features)),
+                     type = "response")
+
+lr_b_metrics_05 <- evaluate_clf(task1_y_test, prob_lr_b, threshold = 0.5) %>%
+  mutate(threshold_type = "0.5")
+
+youden_lr_b <- get_youden_cutoff(task1_y_test, prob_lr_b)
+
+lr_b_metrics_youden <- evaluate_clf(task1_y_test, prob_lr_b, threshold = youden_lr_b) %>%
+  mutate(threshold_type = "Youden")
+
+lr_b_metrics <- bind_rows(lr_b_metrics_05, lr_b_metrics_youden) %>%
+  mutate(model = "LR-B (9 feat)") %>%
+  dplyr::select(model, threshold_type, everything())
+
+lr_b_metrics
+```
+
+```{r task1-lr-b-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+roc_lr_b <- pROC::roc(task1_y_test, prob_lr_b,
+                      levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_lr_b,
+     main = paste0("ROC — LR-B (9 features)  AUC = ", round(auc(roc_lr_b), 3)))
+youden_coords_b <- pROC::coords(roc_lr_b, x = "best", best.method = "youden",
+                                ret = c("specificity", "sensitivity"), transpose = FALSE)
+points(youden_coords_b$specificity, youden_coords_b$sensitivity,
+       pch = 19, col = "red", cex = 1.5)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+```
+
+With 9 deduplicated features, LR-B is more stable no inflated standard errors than LR-A — all coefficients are statistically significant.
+The Youden threshold achieved the highest sensitivity among all tested models (0.970), meaning only 24 true superconductors were missed.
+This came at the cost of a low specificity of 0.764, producing a large number of false positives.
+
+#### Comparison of LR variants
+
+```{r task1-lr-comparison, message=FALSE, warning=FALSE}
+lr_comparison <- bind_rows(lr_a_metrics, lr_b_metrics) %>%
+  dplyr::select(model, threshold_type, threshold, accuracy, sensitivity,
+                specificity, precision, f1, balanced_acc, auc)
+
+lr_comparison
+```
+
+LR-A achieves slightly higher AUC (0.928 vs 0.921) because the 20-feature set contains more signal despite the redundancy.
+However, the non-significant predictors in LR-A reduce its interpretability. LR-B with the Youden threshold has the highest sensitivity (0.970)
+and the fewest missed superconductors (24), making it the winner in terms of senstivity. However, its specificity is lower and gives us 774 false positives
+which could be a huge time and resource problem in laboratory testing.
+
+### Support Vector Machine
+
+Support vector machine with a radial basis function (RBF) kernel finds a non-linear decision boundary by maximising the margin between classes in a
+high-dimensional feature space. Because SVM is sensitive to feature scale, all predictors are centred and scaled using parameters estimated from the training set only.
+
+Two feature spaces are evaluated like in LR to asses how collinearity of features affects SVM performance.
+
+#### SVM-A: 20 EDA-selected features
+
+```{r task1-svm-a-fit, message=FALSE, warning=FALSE}
+preproc_a          <- preProcess(task1_train %>% select(all_of(top20_eda)),
+                                 method = c("center", "scale"))
+train_svm_a_scaled <- predict(preproc_a, task1_train %>% select(all_of(top20_eda)))
+test_svm_a_scaled  <- predict(preproc_a, task1_test  %>% select(all_of(top20_eda)))
+
+model_svm_a <- svm(
+  x           = train_svm_a_scaled,
+  y           = task1_y_train,
+  kernel      = "radial",
+  probability = TRUE
+)
+```
+
+```{r task1-svm-a-eval, message=FALSE, warning=FALSE}
+prob_svm_a <- attr(
+  predict(model_svm_a, test_svm_a_scaled, probability = TRUE),
+  "probabilities"
+)[, "high_tc"]
+
+svm_a_metrics_05 <- evaluate_clf(task1_y_test, prob_svm_a, threshold = 0.5) %>%
+  mutate(threshold_type = "0.5")
+
+youden_svm_a <- get_youden_cutoff(task1_y_test, prob_svm_a)
+
+svm_a_metrics_youden <- evaluate_clf(task1_y_test, prob_svm_a, threshold = youden_svm_a) %>%
+  mutate(threshold_type = "Youden")
+
+svm_a_metrics <- bind_rows(svm_a_metrics_05, svm_a_metrics_youden) %>%
+  mutate(model = "SVM-A (20 feat)") %>%
+  dplyr::select(model, threshold_type, everything())
+
+svm_a_metrics
+```
+
+```{r task1-svm-a-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+roc_svm_a <- pROC::roc(task1_y_test, prob_svm_a,
+                       levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_svm_a,
+     main = paste0("ROC — SVM-A (20 features)  AUC = ", round(auc(roc_svm_a), 3)))
+youden_coords_svm_a <- pROC::coords(roc_svm_a, x = "best", best.method = "youden",
+                                    ret = c("specificity", "sensitivity"), transpose = FALSE)
+points(youden_coords_svm_a$specificity, youden_coords_svm_a$sensitivity,
+       pch = 19, col = "red", cex = 1.5)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+```
+
+With 20 features, SVM-A contains several correlated predictors. These duplicate dimensions in the kernel space and can distort the margin,
+which limits performance compared to the reduced feature set as we will see in SVM-B.
+
+#### SVM-B: 9 deduplicated features
+
+```{r task1-svm-b-fit, message=FALSE, warning=FALSE}
+preproc_b          <- preProcess(task1_train %>% select(all_of(lr2_features)),
+                                 method = c("center", "scale"))
+train_svm_b_scaled <- predict(preproc_b, task1_train %>% select(all_of(lr2_features)))
+test_svm_b_scaled  <- predict(preproc_b, task1_test  %>% select(all_of(lr2_features)))
+
+model_svm_b <- svm(
+  x           = train_svm_b_scaled,
+  y           = task1_y_train,
+  kernel      = "radial",
+  probability = TRUE
+)
+```
+
+```{r task1-svm-b-eval, message=FALSE, warning=FALSE}
+prob_svm_b <- attr(
+  predict(model_svm_b, test_svm_b_scaled, probability = TRUE),
+  "probabilities"
+)[, "high_tc"]
+
+svm_b_metrics_05 <- evaluate_clf(task1_y_test, prob_svm_b, threshold = 0.5) %>%
+  mutate(threshold_type = "0.5")
+
+youden_svm_b <- get_youden_cutoff(task1_y_test, prob_svm_b)
+
+svm_b_metrics_youden <- evaluate_clf(task1_y_test, prob_svm_b, threshold = youden_svm_b) %>%
+  mutate(threshold_type = "Youden")
+
+svm_b_metrics <- bind_rows(svm_b_metrics_05, svm_b_metrics_youden) %>%
+  mutate(model = "SVM-B (9 feat)") %>%
+  dplyr::select(model, threshold_type, everything())
+
+svm_b_metrics
+```
+
+```{r task1-svm-b-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+roc_svm_b <- pROC::roc(task1_y_test, prob_svm_b,
+                       levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_svm_b,
+     main = paste0("ROC — SVM-B (9 features)  AUC = ", round(auc(roc_svm_b), 3)))
+youden_coords_svm_b <- pROC::coords(roc_svm_b, x = "best", best.method = "youden",
+                                    ret = c("specificity", "sensitivity"), transpose = FALSE)
+points(youden_coords_svm_b$specificity, youden_coords_svm_b$sensitivity,
+       pch = 19, col = "red", cex = 1.5)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+```
+
+With collinearity removed, SVM-B has a cleaner margin in the kernel space. This is the opposite of random forest or decision trees, where more features help — here, removing redundant
+dimensions improves performance.
+
+#### Comparison of SVM variants
+
+```{r task1-svm-comparison, message=FALSE, warning=FALSE}
+svm_comparison <- bind_rows(svm_a_metrics, svm_b_metrics) %>%
+  dplyr::select(model, threshold_type, threshold, accuracy, sensitivity,
+                specificity, precision, f1, balanced_acc, auc)
+
+svm_comparison
+```
+
+SVM is the least interpretable model evaluated — the RBF kernel maps data into an implicit high-dimensional space and there are no feature coefficients to check.
+Unlike LR, where collinearity inflates standard errors, in SVM collinearity distorts the margins geometry directly.
+SVM-B with 9 deduplicated features therefore slightly outperforms SVM-A in AUC (0.926 vs 0.916) and other metrics, confirming that reducing redundancy benefits margin-based classifiers.
 
 
 ## Scenario 3: Feature Selection Methods
@@ -127,11 +379,9 @@ The motivation for this scenario comes from the exploratory data analysis, where
 
 The compared feature-selection approaches are:
 
-- backward stepwise logistic regression using AIC,
-- lasso logistic regression,
-- elastic net logistic regression.
-
-
+-   backward stepwise logistic regression using AIC,
+-   lasso logistic regression,
+-   elastic net logistic regression.
 
 ```{r task3-setup, message=FALSE, warning=FALSE}
 load("prepared_data.RData")
@@ -214,7 +464,6 @@ get_youden_threshold <- function(truth, prob) {
 }
 ```
 
-
 ### Backward stepwise logistic regression
 
 As the algorithmic feature-selection method, we used backward stepwise logistic regression. The initial model contained all numerical predictors from the prepared dataset. Backward selection starts with this full model and iteratively removes predictors according to the AIC criterion. AIC balances model fit and model complexity, therefore the method should remove predictors that do not sufficiently improve the model.
@@ -291,13 +540,11 @@ backward_metrics
 
 The model was evaluated using both the default threshold of 0.5 and the Youden threshold. The Youden threshold was included because the target classes are imbalanced and the minority `high_tc` class is especially important.
 
-
 The backward-selected logistic regression model achieved an AUC of 0.952, indicating strong overall ability to separate `high_tc` and `non_high_tc` samples. With the default threshold of 0.5, the model reached an accuracy of 0.895, sensitivity of 0.728 and F1-score of 0.731.
 
 The Youden threshold selected from the ROC curve was 0.253. Using this lower threshold substantially increased sensitivity from 0.728 to 0.929, which means that the model detected a much larger proportion of true `high_tc` samples. This improvement came at the cost of lower specificity and precision. Specificity decreased from 0.936 to 0.870 and precision decreased from 0.733 to 0.634. The F1-score increased from 0.731 to 0.753, suggesting a better balance between precision and recall under the Youden threshold.
 
 Overall, backward stepwise logistic regression provided strong predictive performance, but it retained a large number of predictors. Therefore, while the model is useful as a performance-oriented baseline for feature selection, its interpretability remains limited.
-
 
 ### Lasso logistic regression
 
@@ -317,8 +564,8 @@ cv_lasso <- cv.glmnet(
 
 The cross-validation criterion was AUC because the dataset is imbalanced and accuracy alone may be misleading. Two lambda values were evaluated:
 
-- `lambda.min`, which gives the best cross-validated AUC,
-- `lambda.1se`, which gives a simpler model within one standard error of the best model.
+-   `lambda.min`, which gives the best cross-validated AUC,
+-   `lambda.1se`, which gives a simpler model within one standard error of the best model.
 
 ```{r task3-lasso-lambda-min, message=FALSE, warning=FALSE}
 lasso_coef_min <- coef(cv_lasso, s = "lambda.min")
@@ -691,74 +938,6 @@ feature_selection_counts
 
 Overall, the scenario shows that the predictive signal is not concentrated in only a small number of predictors. Instead, many material descriptors contribute to the classification task. Regularized methods, especially lasso with `lambda.1se`, provide a better trade-off between model complexity and predictive performance, while backward stepwise regression keeps more predictors and is therefore less interpretable.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # 15. Final Model Selection
 
 Based on the results, the final model should be selected according to both performance and interpretability.
@@ -769,11 +948,11 @@ The selected model should provide a good compromise between classification perfo
 
 The main limitations of this project are:
 
-- the original regression problem was simplified into binary classification,
-- the threshold of 77 K is practically meaningful but still simplifies the target variable,
-- class imbalance may influence model evaluation,
-- correlated predictors can affect feature-selection results,
-- the models identify statistical relationships, not direct physical causality.
+-   the original regression problem was simplified into binary classification,
+-   the threshold of 77 K is practically meaningful but still simplifies the target variable,
+-   class imbalance may influence model evaluation,
+-   correlated predictors can affect feature-selection results,
+-   the models identify statistical relationships, not direct physical causality.
 
 # 17. Conclusion
 
