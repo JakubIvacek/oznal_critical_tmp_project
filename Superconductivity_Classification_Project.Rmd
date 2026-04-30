@@ -588,6 +588,25 @@ visible inside the ensemble. Tthe 10 EDA-only features such as `mean_Valence`, `
 but contribute less once the forest already used correlated alternatives. The decision tree, being a single greedy model, selects only the little number of features
 that provide the best and cleanest split — its top splits typically overlap with the core features mentioned, but it ignores the weaker signals that RF leverages across many trees.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## Scenario 3: Feature Selection Methods
 
 In the third scenario, we focus on feature selection for the binary classification task. The goal is to compare one algorithmic feature-selection method with two embedded methods. We use the same target variable as in the previous scenario, where superconductors are classified as `high_tc` if their critical temperature is at least 77 K and `non_high_tc` otherwise.
@@ -616,6 +635,13 @@ y_test  <- if_else(test_task3$tc_class == "high_tc", 1, 0)
 
 x_train <- model.matrix(tc_class ~ ., data = train_task3)[, -1]
 x_test  <- model.matrix(tc_class ~ ., data = test_task3)[, -1]
+
+# Fixed CV folds for reproducible Lasso and Elastic Net results
+set.seed(42)
+
+foldid_glmnet <- sample(
+  rep(1:10, length.out = nrow(x_train))
+)
 ```
 
 The full set of numerical predictors was used as the initial candidate feature space. This allows the feature-selection methods to operate on the complete high-dimensional representation rather than on a manually pre-filtered subset.
@@ -768,14 +794,13 @@ Overall, backward stepwise logistic regression provided strong predictive perfor
 Lasso logistic regression was used as the first embedded feature-selection method. In `glmnet`, lasso corresponds to `alpha = 1`. This method can shrink some coefficients exactly to zero, which means that it performs feature selection directly during model fitting.
 
 ```{r task3-lasso-fit, message=FALSE, warning=FALSE}
-set.seed(42)
-
 cv_lasso <- cv.glmnet(
   x = x_train,
   y = y_train,
   family = "binomial",
   alpha = 1,
-  type.measure = "auc"
+  type.measure = "auc",
+  foldid = foldid_glmnet
 )
 ```
 
@@ -905,8 +930,6 @@ lasso_summary
 Elastic net was used as the second embedded feature-selection method. It combines lasso and ridge penalties. The `alpha` parameter controls this combination: values closer to 1 behave more like lasso, while values closer to 0 behave more like ridge.
 
 ```{r task3-elastic-net-fit, message=FALSE, warning=FALSE}
-set.seed(42)
-
 alpha_grid <- c(0.2, 0.5, 0.8)
 
 enet_cv_results <- tibble(alpha = alpha_grid) %>%
@@ -918,7 +941,8 @@ enet_cv_results <- tibble(alpha = alpha_grid) %>%
         y = y_train,
         family = "binomial",
         alpha = .x,
-        type.measure = "auc"
+        type.measure = "auc",
+        foldid = foldid_glmnet
       )
     ),
     best_auc = purrr::map_dbl(cv_fit, ~ max(.x$cvm))
