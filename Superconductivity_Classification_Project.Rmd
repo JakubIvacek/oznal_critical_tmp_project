@@ -103,7 +103,10 @@ evaluate_clf <- function(truth, prob, threshold = 0.5) {
     precision    = unname(cm$byClass["Precision"]),
     f1           = unname(cm$byClass["F1"]),
     balanced_acc = unname(cm$byClass["Balanced Accuracy"]),
-    auc          = as.numeric(pROC::auc(roc_obj))
+    auc          = as.numeric(pROC::auc(roc_obj)),
+    tp           = cm$table["high_tc",     "high_tc"],
+    fn           = cm$table["non_high_tc", "high_tc"],
+    fp           = cm$table["high_tc",     "non_high_tc"]
   )
 }
 
@@ -119,15 +122,11 @@ get_youden_cutoff <- function(truth, prob) {
 
 ### Logistic Regression
 
-Logistic regression is the most interpretable model in this scenario. Each fitted coefficient directly represents the log-odds change increase per unit
-in the corresponding feature. p-values and confidence intervals provide formal statistical tests for each predictor. Two feature spaces are evaluated
-to assess how collinearity affects logistic regression performance and interpretability.
+Logistic regression is the most interpretable model in this scenario. Each fitted coefficient directly represents the log-odds change increase per unit in the corresponding feature. p-values and confidence intervals provide formal statistical tests for each predictor. Two feature spaces are evaluated to assess how collinearity affects logistic regression performance and interpretability.
 
 #### LR-A: 20 EDA-selected features
 
-The first logistic regression model uses the top 20 features ranked by standardized mean difference (SMD).
- SMD measures how well a predictor separates the two classes on average, giving a model-free ranking.
-  This feature space provides maximum signal but includes several highly correlated predictors.
+The first logistic regression model uses the top 20 features ranked by standardized mean difference (SMD). SMD measures how well a predictor separates the two classes on average, giving a model-free ranking. This feature space provides maximum signal but includes several highly correlated predictors.
 
 ```{r task1-lr-a-fit, message=FALSE, warning=FALSE}
 model_lr_a <- glm(
@@ -172,14 +171,11 @@ points(youden_coords_a$specificity, youden_coords_a$sensitivity,
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 ```
 
-With the default threshold of 0.5, LR-A achieved an accuracy of 0.871 and sensitivity of 0.642, meaning that about 36% of true high-temperature superconductors
-were missed. The Youden threshold lowered the decision boundary and increased sensitivity to 0.946, recovering the majority of missed superconductors at
-the cost of lower specificity. However, two features (mean_Valence, gmean_Valence) showed non-significant coefficients — a sign of collinearity inflating standard errors.
+With the default threshold of 0.5, LR-A achieved an accuracy of 0.871 and sensitivity of 0.642, meaning that about 36% of true high-temperature superconductors were missed. The Youden threshold lowered the decision boundary and increased sensitivity to 0.946, recovering the majority of missed superconductors at the cost of lower specificity. However, two features (mean_Valence, gmean_Valence) showed non-significant coefficients — a sign of collinearity inflating standard errors.
 
 #### LR-B: 9 deduplicated features
 
-The second logistic regression model uses a reduced set of 9 features obtained by removing redundant predictors from the top-20 set.
- Collinearity groups were identified from the correlation matrix, and one representative per group was retained.
+The second logistic regression model uses a reduced set of 9 features obtained by removing redundant predictors from the top-20 set. Collinearity groups were identified from the correlation matrix, and one representative per group was retained.
 
 ```{r task1-lr-b-fit, message=FALSE, warning=FALSE}
 cat("LR-B features:", length(lr2_features), "\n")
@@ -226,9 +222,7 @@ points(youden_coords_b$specificity, youden_coords_b$sensitivity,
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 ```
 
-With 9 deduplicated features, LR-B is more stable no inflated standard errors than LR-A — all coefficients are statistically significant.
-The Youden threshold achieved the highest sensitivity among all tested models (0.970), meaning only 24 true superconductors were missed.
-This came at the cost of a low specificity of 0.764, producing a large number of false positives.
+With 9 deduplicated features, LR-B is more stable no inflated standard errors than LR-A — all coefficients are statistically significant. The Youden threshold achieved the highest sensitivity among all tested models (0.970), meaning only 24 true superconductors were missed. This came at the cost of a low specificity of 0.764, producing a large number of false positives.
 
 #### Comparison of LR variants
 
@@ -240,15 +234,11 @@ lr_comparison <- bind_rows(lr_a_metrics, lr_b_metrics) %>%
 lr_comparison
 ```
 
-LR-A achieves slightly higher AUC (0.928 vs 0.921) because the 20-feature set contains more signal despite the redundancy.
-However, the non-significant predictors in LR-A reduce its interpretability. LR-B with the Youden threshold has the highest sensitivity (0.970)
-and the fewest missed superconductors (24), making it the winner in terms of senstivity. However, its specificity is lower and gives us 774 false positives
-which could be a huge time and resource problem in laboratory testing.
+LR-A achieves slightly higher AUC (0.928 vs 0.921) because the 20-feature set contains more signal despite the redundancy. However, the non-significant predictors in LR-A reduce its interpretability. LR-B with the Youden threshold has the highest sensitivity (0.970) and the fewest missed superconductors (24), making it the winner in terms of senstivity. However, its specificity is lower and gives us 774 false positives which could be a huge time and resource problem in laboratory testing.
 
 ### Support Vector Machine
 
-Support vector machine with a radial basis function (RBF) kernel finds a non-linear decision boundary by maximising the margin between classes in a
-high-dimensional feature space. Because SVM is sensitive to feature scale, all predictors are centred and scaled using parameters estimated from the training set only.
+Support vector machine with a radial basis function (RBF) kernel finds a non-linear decision boundary by maximising the margin between classes in a high-dimensional feature space. Because SVM is sensitive to feature scale, all predictors are centred and scaled using parameters estimated from the training set only.
 
 Two feature spaces are evaluated like in LR to asses how collinearity of features affects SVM performance.
 
@@ -301,8 +291,7 @@ points(youden_coords_svm_a$specificity, youden_coords_svm_a$sensitivity,
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 ```
 
-With 20 features, SVM-A contains several correlated predictors. These duplicate dimensions in the kernel space and can distort the margin,
-which limits performance compared to the reduced feature set as we will see in SVM-B.
+With 20 features, SVM-A contains several correlated predictors. These duplicate dimensions in the kernel space and can distort the margin, which limits performance compared to the reduced feature set as we will see in SVM-B.
 
 #### SVM-B: 9 deduplicated features
 
@@ -353,8 +342,7 @@ points(youden_coords_svm_b$specificity, youden_coords_svm_b$sensitivity,
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 ```
 
-With collinearity removed, SVM-B has a cleaner margin in the kernel space. This is the opposite of random forest or decision trees, where more features help — here, removing redundant
-dimensions improves performance.
+With collinearity removed, SVM-B has a cleaner margin in the kernel space. This is the opposite of random forest or decision trees, where more features help — here, removing redundant dimensions improves performance.
 
 #### Comparison of SVM variants
 
@@ -366,10 +354,185 @@ svm_comparison <- bind_rows(svm_a_metrics, svm_b_metrics) %>%
 svm_comparison
 ```
 
-SVM is the least interpretable model evaluated — the RBF kernel maps data into an implicit high-dimensional space and there are no feature coefficients to check.
-Unlike LR, where collinearity inflates standard errors, in SVM collinearity distorts the margins geometry directly.
-SVM-B with 9 deduplicated features therefore slightly outperforms SVM-A in AUC (0.926 vs 0.916) and other metrics, confirming that reducing redundancy benefits margin-based classifiers.
+SVM is the least interpretable model evaluated — the RBF kernel maps data into an implicit high-dimensional space and there are no feature coefficients to check. Unlike LR, where collinearity inflates standard errors, in SVM collinearity distorts the margins geometry directly. SVM-B with 9 deduplicated features therefore slightly outperforms SVM-A in AUC (0.926 vs 0.916) and other metrics, confirming that reducing redundancy benefits margin-based classifiers.
 
+### Random Forest
+
+Random forest builds an ensemble method that consists of decision trees, each trained on a bootstrap sample of the data with a random subset of features considered at each split greedily. This randomisation makes it robust to collinearity — correlated features share the splits across trees rather than distorting a single boundary. The full set of 81 numerical predictors is used, allowing the forest to use weak signals not captured by EDA screening that might proove useful in combinaton with other features.
+
+Feature importance is measured by mean decrease in Gini impurity (MeanDecreaseGini), which reflects how much each predictor reduces node impurity across all trees.
+
+```{r task1-rf-fit, message=FALSE, warning=FALSE}
+model_rf <- randomForest(
+  tc_class ~ .,
+  data       = bind_cols(task1_train %>% select(all_of(numeric_predictors)),
+                         tc_class = task1_y_train),
+  ntree      = 300,
+  mtry       = floor(sqrt(length(numeric_predictors))),
+  importance = TRUE
+)
+
+cat("RF OOB error:", round(model_rf$err.rate[300, "OOB"], 4), "\n")
+```
+
+```{r task1-rf-oob, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
+data.frame(
+  trees       = seq_len(nrow(model_rf$err.rate)),
+  OOB         = model_rf$err.rate[, "OOB"],
+  high_tc     = model_rf$err.rate[, "high_tc"],
+  non_high_tc = model_rf$err.rate[, "non_high_tc"]
+) %>%
+  pivot_longer(-trees, names_to = "type", values_to = "error") %>%
+  ggplot(aes(trees, error, color = type)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(
+    values = c("OOB" = "black", "high_tc" = "#27ae60", "non_high_tc" = "#e74c3c"),
+    name = NULL
+  ) +
+  labs(title = "OOB error stabilises as more trees are added",
+       x = "Number of trees", y = "Error rate") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+```{r task1-rf-eval, message=FALSE, warning=FALSE}
+prob_rf <- predict(model_rf,
+                   newdata = task1_test %>% select(all_of(numeric_predictors)),
+                   type = "prob")[, "high_tc"]
+
+rf_metrics_05 <- evaluate_clf(task1_y_test, prob_rf, threshold = 0.5) %>%
+  mutate(threshold_type = "0.5")
+
+youden_rf <- get_youden_cutoff(task1_y_test, prob_rf)
+
+rf_metrics_youden <- evaluate_clf(task1_y_test, prob_rf, threshold = youden_rf) %>%
+  mutate(threshold_type = "Youden")
+
+rf_metrics <- bind_rows(rf_metrics_05, rf_metrics_youden) %>%
+  mutate(model = "RF (81 feat)") %>%
+  dplyr::select(model, threshold_type, everything())
+
+rf_metrics
+```
+
+```{r task1-rf-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+roc_rf <- pROC::roc(task1_y_test, prob_rf,
+                    levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_rf,
+     main = paste0("ROC — Random Forest (81 features)  AUC = ", round(auc(roc_rf), 3)))
+youden_coords_rf <- pROC::coords(roc_rf, x = "best", best.method = "youden",
+                                 ret = c("specificity", "sensitivity"), transpose = FALSE)
+points(youden_coords_rf$specificity, youden_coords_rf$sensitivity,
+       pch = 19, col = "red", cex = 1.5)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+```
+
+```{r task1-rf-importance, message=FALSE, warning=FALSE, fig.width=7, fig.height=6}
+imp_df <- importance(model_rf) %>%
+  as.data.frame() %>%
+  rownames_to_column("feature") %>%
+  arrange(desc(MeanDecreaseGini)) %>%
+  slice_head(n = 20)
+
+ggplot(imp_df, aes(x = reorder(feature, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Random Forest — Top 20 features by MeanDecreaseGini",
+       x = NULL, y = "MeanDecreaseGini") +
+  theme_minimal()
+```
+
+Random forest achieved the highest AUC (0.978) of all evaluated models, with the Youden threshold giving sensitivity of 0.953 and specificity of 0.934. With 300 trees and random feature subsampling at each split, the ensemble handles correlated predictors itself — unlike LR and SVM where collinearity is harmful, more features help RF by providing more signal per split.
+
+RF with the Youden threshold is the best overall model. Compared to LR-B, which achieves the highest raw sensitivity (0.970), RF misses only
+13 more superconductors (37 vs 24 false negatives), but generates approximately 550 fewer false positives. In a laboratory screening context this trade-off strongly
+favours RF — 500 fewer unnecessary experiments is a substantial saving, while 18 additional missed candidates is probablly a smaller cost.
+
+The model is partially interpretable through feature importance, but no directional effect can be read from importance scores alone: a high MeanDecreaseGini only
+tells us a feature is useful, not whether higher values increase or decrease the probability of `high_tc`.
+
+### Decision Tree
+
+A single decision tree recursively greedely like RF splits the data on the most informative feature at each node. It is the most directly interpretable model 
+in this scenario — the tree diagram shows the exact decision path for any prediction, with explicit thresholds and feature names at every split.
+The tree is grown with `cp = 0.001` and then pruned back to the complexity parameter that minimises cross-validated error.
+
+```{r task1-dt-fit, message=FALSE, warning=FALSE}
+model_dt <- rpart(
+  tc_class ~ .,
+  data    = bind_cols(task1_train %>% select(all_of(numeric_predictors)),
+                      tc_class = task1_y_train),
+  method  = "class",
+  control = rpart.control(cp = 0.001)
+)
+
+best_cp       <- model_dt$cptable[which.min(model_dt$cptable[, "xerror"]), "CP"]
+model_dt_pruned <- prune(model_dt, cp = best_cp)
+cat("Best cp:", round(best_cp, 6),
+    "| Terminal nodes:", model_dt_pruned$numresp, "\n")
+```
+
+```{r task1-dt-plot, message=FALSE, warning=FALSE, fig.width=9, fig.height=6}
+model_dt_viz <- prune(model_dt, cp = 0.005)
+rpart.plot(model_dt_viz, type = 4, extra = 104,
+           main = "Decision Tree (simplified view, cp = 0.005)")
+```
+
+```{r task1-dt-eval, message=FALSE, warning=FALSE}
+prob_dt <- predict(model_dt_pruned,
+                   newdata = task1_test %>% select(all_of(numeric_predictors)),
+                   type = "prob")[, "high_tc"]
+
+dt_metrics_05 <- evaluate_clf(task1_y_test, prob_dt, threshold = 0.5) %>%
+  mutate(threshold_type = "0.5")
+
+youden_dt <- get_youden_cutoff(task1_y_test, prob_dt)
+
+dt_metrics_youden <- evaluate_clf(task1_y_test, prob_dt, threshold = youden_dt) %>%
+  mutate(threshold_type = "Youden")
+
+dt_metrics <- bind_rows(dt_metrics_05, dt_metrics_youden) %>%
+  mutate(model = "DT (81 feat)") %>%
+  dplyr::select(model, threshold_type, everything())
+
+dt_metrics
+```
+
+```{r task1-dt-roc, message=FALSE, warning=FALSE, fig.width=6, fig.height=5}
+roc_dt <- pROC::roc(task1_y_test, prob_dt,
+                    levels = c("non_high_tc", "high_tc"), quiet = TRUE)
+plot(roc_dt,
+     main = paste0("ROC — Decision Tree (81 features)  AUC = ", round(auc(roc_dt), 3)))
+youden_coords_dt <- pROC::coords(roc_dt, x = "best", best.method = "youden",
+                                 ret = c("specificity", "sensitivity"), transpose = FALSE)
+points(youden_coords_dt$specificity, youden_coords_dt$sensitivity,
+       pch = 19, col = "red", cex = 1.5)
+legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
+```
+
+The decision tree achieved an AUC of 0.955, placing it between LR/SVM and RF. It is the second most interpretable model after LR — the tree diagram provides a fully
+readable decision path. Unlike LR, no p-values are available, but the splits themselves are indication of feature importance. Collinearity is not a concern for
+DT since each split greedily picks one feature, but a single tree is more prone to overfitting than a forest — the 0.023 AUC gap versus RF reflects that difference perfectly.
+
+### Overall comparison
+
+```{r task1-overall-comparison, message=FALSE, warning=FALSE}
+task1_summary <- bind_rows(
+  lr_a_metrics, lr_b_metrics,
+  svm_a_metrics, svm_b_metrics,
+  rf_metrics,
+  dt_metrics
+) %>%
+  dplyr::select(model, threshold_type, accuracy, sensitivity, specificity,
+                f1, balanced_acc, auc, tp, fn, fp)
+
+task1_summary
+```
+
+RF with the Youden threshold is the recommended model — it achieves the highest AUC (0.978), best balanced accuracy, and generates far fewer false positives than LR, 
+making it most practical for laboratory screening. LR-B with the Youden threshold achieves the highest sensitivity (0.970) and fewest missed superconductors 
+(24 false negatives), but this comes at the cost of a very high false positive count (550 more), meaning many unnecessary experiments.
+For most real-world screening workflows, the we think this trade-off favours RF saving lots of time and resources.
 
 ## Scenario 3: Feature Selection Methods
 
