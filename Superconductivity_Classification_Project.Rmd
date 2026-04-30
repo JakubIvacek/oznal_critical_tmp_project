@@ -48,14 +48,205 @@ data_raw <- readr::read_csv("train.csv", show_col_types = FALSE)
 
 ## Exploratory Data Analysis
 
-```{=html}
-<!--
-Write this part in your own words before submission.
-Suggested content:
-- The goal of this EDA is to check whether the dataset is suitable for the selected classification task.
-- The analysis focuses on data quality, target distribution, class balance, predictor screening, redundancy among predictors, and outliers.
-- The plots are selected only when they support modelling decisions, not as an exhaustive visual dump.
--->
+The goal of this EDA is to verify that the dataset is suitable for binary classification, understand the class distribution, identify predictors that separate the two classes, detect redundancy among predictors, and handle outliers before modelling.
+
+### Data quality
+
+```{r eda-quality, message=FALSE, warning=FALSE}
+cat("Rows:", nrow(data_raw), "| Columns:", ncol(data_raw), "\n")
+cat("Missing values:", sum(is.na(data_raw)), "\n")
+cat("Duplicate rows:", sum(duplicated(data_raw)), "\n")
+```
+
+The dataset contains no missing values. Duplicate rows are removed before next analysis.
+
+```{r eda-dedup, message=FALSE, warning=FALSE}
+data_eda <- distinct(data_raw)
+cat("Rows after deduplication:", nrow(data_eda), "\n")
+```
+
+### Target variable and class balance
+
+The continuous target `critical_temp` is binarised at 77 K — the boiling point of liquid nitrogen, the practical threshold for high-temperature superconductivity.
+
+```{r eda-target, message=FALSE, warning=FALSE}
+data_eda <- data_eda %>%
+  mutate(
+    tc_class = factor(
+      case_when(critical_temp >= 77 ~ "high_tc", TRUE ~ "non_high_tc"),
+      levels = c("non_high_tc", "high_tc")
+    ),
+    tc_binary = if_else(tc_class == "high_tc", 1, 0)
+  )
+
+class_balance <- data_eda %>%
+  count(tc_class) %>%
+  mutate(proportion = n / sum(n))
+
+class_balance
+```
+
+```{r eda-target-plots, message=FALSE, warning=FALSE, fig.width=10, fig.height=4}
+p_hist <- ggplot(data_eda, aes(x = critical_temp)) +
+  geom_histogram(bins = 50, fill = "grey75", color = "black") +
+  geom_vline(xintercept = 77, color = "red", linetype = "dashed", linewidth = 1) +
+  labs(title = "Distribution of critical_temp with 77 K threshold",
+       x = "critical_temp", y = "Count") +
+  theme_minimal()
+
+p_bar <- ggplot(class_balance, aes(x = tc_class, y = n, fill = tc_class)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(proportion, accuracy = 0.1)), vjust = -0.3) +
+  labs(title = "Class balance", x = "Class", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+p_hist + p_bar
+```
+
+The dataset is imbalanced — approximately 79% of materials are `non_high_tc` and 21% are `high_tc`. This imbalance motivates the use of the Youden threshold rather than the default 0.5 in all models.
+
+### Feature screening by class separation (SMD)
+
+Standardized mean difference (SMD) measures how far apart the class means are relative to pooled within-class variability. It is a model-free ranking that does not require fitting any classifier.
+
+```{r eda-smd, message=FALSE, warning=FALSE}
+numeric_predictors_eda <- data_eda %>%
+  select(where(is.numeric), -critical_temp, -tc_binary) %>%
+  names()
+
+feature_screening <- data_eda %>%
+  select(tc_class, all_of(numeric_predictors_eda)) %>%
+  pivot_longer(cols = -tc_class, names_to = "feature", values_to = "value") %>%
+  group_by(feature, tc_class) %>%
+  summarise(mean_value = mean(value), sd_value = sd(value), .groups = "drop") %>%
+  pivot_wider(names_from = tc_class,
+              values_from = c(mean_value, sd_value), names_sep = "_") %>%
+  mutate(
+    mean_diff = mean_value_high_tc - mean_value_non_high_tc,
+    pooled_sd = sqrt((sd_value_high_tc^2 + sd_value_non_high_tc^2) / 2),
+    abs_smd   = if_else(pooled_sd > 0, abs(mean_diff / pooled_sd), NA_real_)
+  ) %>%
+  arrange(desc(abs_smd))
+
+feature_screening %>%
+  select(feature, abs_smd, mean_diff) %>%
+  slice_head(n = 20)
+```
+
+The top 20 features by SMD are used as the EDA-selected feature space for logistic regression and SVM.
+
+### Top feature distributions
+
+```{r eda-boxplots, message=FALSE, warning=FALSE, fig.width=10, fig.height=22}
+top_features_eda <- feature_screening %>% slice_head(n = 20) %>% pull(feature)
+
+plot_data_eda <- data_eda %>%
+  select(tc_class, all_of(top_features_eda)) %>%
+  pivot_longer(cols = -tc_class, names_to = "feature", values_to = "value")
+
+ggplot(plot_data_eda, aes(x = tc_class, y = value, fill = tc_class)) +
+  geom_boxplot(alpha = 0.75, outlier.alpha = 0.10) +
+  facet_wrap(~ feature, scales = "free_y", ncol = 2) +
+  labs(title = "Top 20 predictors by SMD — boxplots", x = "Class", y = "Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Correlation among top predictors
+
+```{r eda-corr, message=FALSE, warning=FALSE, fig.width=8, fig.height=7}
+cor_top <- data_eda %>%
+  select(all_of(top_features_eda)) %>%
+  cor()
+
+pheatmap(cor_top, cluster_rows = TRUE, cluster_cols = TRUE,
+         main = "Correlation matrix — top 20 EDA features")
+```
+
+```{r eda-strong-pairs, message=FALSE, warning=FALSE}
+strong_pairs <- cor_top %>%
+  as.data.frame() %>%
+  rownames_to_column("feature_1") %>%
+  pivot_longer(cols = -feature_1, names_to = "feature_2", values_to = "correlation") %>%
+  filter(feature_1 != feature_2) %>%
+  mutate(
+    pair_id         = purrr::map2_chr(feature_1, feature_2, ~ paste(sort(c(.x, .y)), collapse = " | ")),
+    abs_correlation = abs(correlation)
+  ) %>%
+  arrange(desc(abs_correlation)) %>%
+  distinct(pair_id, .keep_all = TRUE)
+
+strong_pairs %>%
+  filter(abs_correlation >= 0.87) %>%
+  select(feature_1, feature_2, correlation) %>%
+  slice_head(n = 15)
+```
+
+Several feature pairs are correlated above 0.87. These collinearity groups motivated the construction of the 9-feature deduplicated set (`lr2_features`) used in LR-B and SVM-B — one representative per cluster was retained.
+
+### Outlier removal and train/test split
+
+LR and SVM are sensitive to outliers. Rows with any value outside 1.5 × IQR in any of the top-20 features are removed before splitting.
+
+```{r eda-outliers-split, message=FALSE, warning=FALSE}
+top20_eda_local <- top_features_eda
+
+keep_rows <- rep(TRUE, nrow(data_eda))
+for (feat in top20_eda_local) {
+  vals  <- data_eda[[feat]]
+  q1    <- quantile(vals, 0.25)
+  q3    <- quantile(vals, 0.75)
+  iqr_v <- q3 - q1
+  keep_rows <- keep_rows & vals >= q1 - 1.5 * iqr_v & vals <= q3 + 1.5 * iqr_v
+}
+
+data_clean_eda <- data_eda[keep_rows, ]
+cat("Rows original:", nrow(data_eda),
+    "| After outlier removal:", nrow(data_clean_eda),
+    "| Removed:", sum(!keep_rows), "\n")
+
+set.seed(42)
+data_split_eda <- data_clean_eda %>% mutate(row_id = row_number())
+train_eda <- data_split_eda %>% group_by(tc_class) %>% slice_sample(prop = 0.8) %>% ungroup()
+test_eda  <- data_split_eda %>% anti_join(train_eda, by = "row_id")
+
+cat("Train:", nrow(train_eda), "| Test:", nrow(test_eda), "\n")
+count(train_eda, tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01))
+count(test_eda,  tc_class) %>% mutate(pct = scales::percent(n / sum(n), accuracy = 0.01))
+```
+
+The stratified 80/20 split preserves the class ratio in both sets.
+
+### Deduplicated 9-feature set
+
+Highly correlated feature groups (r \> 0.87) were identified from the heatmap above. One representative per group was retained to remove redundancy for LR and SVM.
+
+```{r eda-lr2-features, message=FALSE, warning=FALSE}
+lr2_features <- c(
+  "wtd_mean_Valence",            # Valence location (cluster r=0.99)
+  "wtd_std_ThermalConductivity", # TC spread (cluster r=0.96–0.99)
+  "range_atomic_radius",         # atomic_radius spread (cluster r=0.87–0.97)
+  "wtd_entropy_Valence",         # Entropy group (kept 2 representatives)
+  "wtd_entropy_atomic_mass",
+  "wtd_std_fie",                 # fie spread (cluster r=0.87+)
+  "wtd_entropy_FusionHeat",      # solo 
+  "gmean_Density",               # solo
+  "range_atomic_mass"            # solo
+)
+
+cat("Deduplicated feature set:", length(lr2_features), "features\n")
+cat(paste(lr2_features, collapse = ", "), "\n")
+```
+
+```{r eda-prepare-objects, message=FALSE, warning=FALSE}
+# Align names for use in Scenario 1 model chunks
+train_df           <- train_eda
+test_df            <- test_eda
+y_train            <- train_eda$tc_class
+y_test             <- test_eda$tc_class
+top20_eda          <- top_features_eda
+numeric_predictors <- numeric_predictors_eda
 ```
 
 ## Scenario 1: Classification methods
@@ -77,10 +268,8 @@ Two feature spaces are compared for logistic regression and SVM:
 Random forest and decision tree use the full set of available numerical features.
 
 ```{r task1-setup, message=FALSE, warning=FALSE}
-
-set.seed(42)
-load("prepared_data.RData")
-
+# Objects train_df, test_df, y_train, y_test, top20_eda, lr2_features,
+# numeric_predictors are created in the EDA section above — no file load needed.
 task1_train   <- train_df
 task1_test    <- test_df
 task1_y_train <- y_train
@@ -484,18 +673,13 @@ ggplot(imp_df, aes(x = reorder(feature, MeanDecreaseGini), y = MeanDecreaseGini)
 
 Random forest achieved the highest AUC (0.978) of all evaluated models, with the Youden threshold giving sensitivity of 0.953 and specificity of 0.934. With 300 trees and random feature subsampling at each split, the ensemble handles correlated predictors itself — unlike LR and SVM where collinearity is harmful, more features help RF by providing more signal per split.
 
-RF with the Youden threshold is the best overall model. Compared to LR-B, which achieves the highest raw sensitivity (0.970), RF misses only
-13 more superconductors (37 vs 24 false negatives), but generates approximately 550 fewer false positives. In a laboratory screening context this trade-off strongly
-favours RF — 500 fewer unnecessary experiments is a substantial saving, while 18 additional missed candidates is probablly a smaller cost.
+RF with the Youden threshold is the best overall model. Compared to LR-B, which achieves the highest raw sensitivity (0.970), RF misses only 13 more superconductors (37 vs 24 false negatives), but generates approximately 550 fewer false positives. In a laboratory screening context this trade-off strongly favours RF — 500 fewer unnecessary experiments is a substantial saving, while 18 additional missed candidates is probablly a smaller cost.
 
-The model is partially interpretable through feature importance, but no directional effect can be read from importance scores alone: a high MeanDecreaseGini only
-tells us a feature is useful, not whether higher values increase or decrease the probability of `high_tc`.
+The model is partially interpretable through feature importance, but no directional effect can be read from importance scores alone: a high MeanDecreaseGini only tells us a feature is useful, not whether higher values increase or decrease the probability of `high_tc`.
 
 ### Decision Tree
 
-A single decision tree recursively greedely like RF splits the data on the most informative feature at each node. It is the most directly interpretable model 
-in this scenario — the tree diagram shows the exact decision path for any prediction, with explicit thresholds and feature names at every split.
-The tree is grown with `cp = 0.001` and then pruned back to the complexity parameter that minimises cross-validated error.
+A single decision tree recursively greedely like RF splits the data on the most informative feature at each node. It is the most directly interpretable model in this scenario — the tree diagram shows the exact decision path for any prediction, with explicit thresholds and feature names at every split. The tree is grown with `cp = 0.001` and then pruned back to the complexity parameter that minimises cross-validated error.
 
 ```{r task1-dt-fit, message=FALSE, warning=FALSE}
 model_dt <- rpart(
@@ -555,9 +739,7 @@ points(youden_coords_dt$specificity, youden_coords_dt$sensitivity,
 legend("bottomright", legend = "Youden threshold", col = "red", pch = 19, bty = "n")
 ```
 
-The decision tree achieved an AUC of 0.955, placing it between LR/SVM and RF. It is the second most interpretable model after LR — the tree diagram provides a fully
-readable decision path. Unlike LR, no p-values are available, but the splits themselves are indication of feature importance. Collinearity is not a concern for
-DT since each split greedily picks one feature, but a single tree is more prone to overfitting than a forest — the 0.023 AUC gap versus RF reflects that difference perfectly.
+The decision tree achieved an AUC of 0.955, placing it between LR/SVM and RF. It is the second most interpretable model after LR — the tree diagram provides a fully readable decision path. Unlike LR, no p-values are available, but the splits themselves are indication of feature importance. Collinearity is not a concern for DT since each split greedily picks one feature, but a single tree is more prone to overfitting than a forest — the 0.023 AUC gap versus RF reflects that difference perfectly.
 
 ### Overall comparison
 
@@ -574,19 +756,9 @@ task1_summary <- bind_rows(
 task1_summary
 ```
 
-RF with the Youden threshold is the recommended model — it achieves the highest AUC (0.978), best balanced accuracy, and generates far fewer false positives than LR, 
-making it most practical for laboratory screening. LR-B with the Youden threshold achieves the highest sensitivity (0.970) and fewest missed superconductors 
-(24 false negatives), but this comes at the cost of a very high false positive count (550 more), meaning many unnecessary experiments.
-For most real-world screening workflows, the we think this trade-off favours RF saving lots of time and resources.
+RF with the Youden threshold is the recommended model — it achieves the highest AUC (0.978), best balanced accuracy, and generates far fewer false positives than LR, making it most practical for laboratory screening. LR-B with the Youden threshold achieves the highest sensitivity (0.970) and fewest missed superconductors (24 false negatives), but this comes at the cost of a very high false positive count (550 more), meaning many unnecessary experiments. For most real-world screening workflows, the we think this trade-off favours RF saving lots of time and resources.
 
-Comparing the features selected by EDA (top 20 by SMD) against the features ranked most important by RF (top 20 by MeanDecreaseGini) reveals an interesting split.
-Ten features appear in both rankings — these are the most robust predictors, capturing signal that is strong regardless of the method used to detect it: 
-`wtd_std_ThermalConductivity`, `range_ThermalConductivity`, `std_ThermalConductivity`, `range_atomic_radius`, `wtd_mean_Valence`, `wtd_gmean_Valence`, 
-`wtd_entropy_atomic_mass`, `wtd_entropy_Valence`, `wtd_entropy_FusionHeat`, and `wtd_entropy_atomic_radius`. The 10 features unique to RF — such as 
-`wtd_std_Valence`, `wtd_mean_ThermalConductivity`, and `wtd_std_ElectronAffinity` — likely gain importance through interactions with other features that only become
-visible inside the ensemble. Tthe 10 EDA-only features such as `mean_Valence`, `gmean_Density`, and `range_fie` separate the classes well in isolation
-but contribute less once the forest already used correlated alternatives. The decision tree, being a single greedy model, selects only the little number of features
-that provide the best and cleanest split — its top splits typically overlap with the core features mentioned, but it ignores the weaker signals that RF leverages across many trees.
+Comparing the features selected by EDA (top 20 by SMD) against the features ranked most important by RF (top 20 by MeanDecreaseGini) reveals an interesting split. Ten features appear in both rankings — these are the most robust predictors, capturing signal that is strong regardless of the method used to detect it: `wtd_std_ThermalConductivity`, `range_ThermalConductivity`, `std_ThermalConductivity`, `range_atomic_radius`, `wtd_mean_Valence`, `wtd_gmean_Valence`, `wtd_entropy_atomic_mass`, `wtd_entropy_Valence`, `wtd_entropy_FusionHeat`, and `wtd_entropy_atomic_radius`. The 10 features unique to RF — such as `wtd_std_Valence`, `wtd_mean_ThermalConductivity`, and `wtd_std_ElectronAffinity` — likely gain importance through interactions with other features that only become visible inside the ensemble. Tthe 10 EDA-only features such as `mean_Valence`, `gmean_Density`, and `range_fie` separate the classes well in isolation but contribute less once the forest already used correlated alternatives. The decision tree, being a single greedy model, selects only the little number of features that provide the best and cleanest split — its top splits typically overlap with the core features mentioned, but it ignores the weaker signals that RF leverages across many trees.
 
 ## Scenario 3: Feature Selection Methods
 
@@ -601,8 +773,7 @@ The compared feature-selection approaches are:
 -   elastic net logistic regression.
 
 ```{r task3-setup, message=FALSE, warning=FALSE}
-load("prepared_data.RData")
-
+# train_df, test_df, numeric_predictors come from the EDA section — no file load needed.
 candidate_features <- numeric_predictors
 
 train_task3 <- train_df %>%
