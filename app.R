@@ -240,7 +240,32 @@ ui <- fluidPage(
       )
     ),
 
-    # ── Tab 4: Summary ───────────────────────────────────────────────────────
+    # ── Tab 4: Random Forest Explorer ────────────────────────────────────────
+    tabPanel("Random Forest",
+      sidebarLayout(
+        sidebarPanel(width = 3,
+          h5("Classification threshold"),
+          sliderInput("rf_thr", NULL, 0.01, 0.99, 0.5, 0.01),
+          actionButton("rf_reset",  "Reset to 0.5",        class = "btn-sm btn-default"),
+          br(), br(),
+          actionButton("rf_youden", "Set Youden threshold", class = "btn-sm btn-info")
+        ),
+        mainPanel(width = 9,
+          fluidRow(
+            column(7,
+              h4("OOB error vs number of trees"),
+              plotOutput("rf_oob", height = "380px")
+            ),
+            column(5,
+              h4("Metrics at threshold"),
+              DTOutput("rf_metrics")
+            )
+          )
+        )
+      )
+    ),
+
+    # ── Tab 5: Summary ───────────────────────────────────────────────────────
     tabPanel("Summary",
       sidebarLayout(
         sidebarPanel(width = 2,
@@ -488,7 +513,43 @@ server <- function(input, output, session) {
               rownames = FALSE, options = list(dom = "t", pageLength = 10))
   })
 
-  # ── Tab 5: Feature Importance ──────────────────────────────────────────────
+  # ── Tab 4: Random Forest Explorer ─────────────────────────────────────────
+  observeEvent(input$rf_reset, updateSliderInput(session, "rf_thr", value = 0.5))
+  observeEvent(input$rf_youden, {
+    coords <- pROC::coords(all_rocs[["Random Forest"]], x = "best",
+                           best.method = "youden", ret = "threshold", transpose = FALSE)
+    updateSliderInput(session, "rf_thr", value = round(as.numeric(coords[1]), 2))
+  })
+
+  output$rf_oob <- renderPlot({
+    data.frame(
+      trees       = seq_len(nrow(model_rf$err.rate)),
+      OOB         = model_rf$err.rate[, "OOB"],
+      high_tc     = model_rf$err.rate[, "high_tc"],
+      non_high_tc = model_rf$err.rate[, "non_high_tc"]
+    ) %>%
+      pivot_longer(-trees, names_to = "type", values_to = "error") %>%
+      ggplot(aes(trees, error, color = type)) +
+      geom_line(linewidth = 0.8) +
+      scale_color_manual(
+        values = c("OOB" = "black", "high_tc" = "#27ae60", "non_high_tc" = "#e74c3c"),
+        name = NULL
+      ) +
+      labs(title = "OOB error stabilises as more trees are added",
+           x = "Number of trees", y = "Error rate") +
+      theme_minimal(base_size = 12) +
+      theme(legend.position = "bottom")
+  })
+
+  output$rf_metrics <- renderDT({
+    row <- get_metrics_row(prob_rf, y_test, input$rf_thr, "Random Forest")
+    row %>%
+      select(-Model) %>%
+      pivot_longer(everything(), names_to = "Metric", values_to = "Value") %>%
+      datatable(rownames = FALSE, options = list(dom = "t", pageLength = 15))
+  })
+
+  # ── Tab 6: Feature Importance ──────────────────────────────────────────────
   output$fi_rf <- renderPlot({
     imp_df %>%
       slice_head(n = input$fi_n) %>%
