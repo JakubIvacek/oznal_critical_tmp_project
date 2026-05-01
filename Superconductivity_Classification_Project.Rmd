@@ -1,7 +1,7 @@
 ---
 title: "Superconductivity Classification Project"
 author: "Tomáš Tisovský, Jakub Ivácek"
-output: html_document
+output: pdf_document
 date: "2026-05-01"
 ---
 
@@ -37,7 +37,7 @@ This project focuses on the classification of superconducting materials using nu
 
 The original target variable in the dataset is `critical_temp`, which is continuous. For this project, the problem was transformed into a binary classification task. Materials with `critical_temp >= 77 K` were assigned to the class `high_tc`, while the remaining materials were assigned to the class `non_high_tc`.
 
-The threshold of 77 K was chosen because it is approximately the boiling point of liquid nitrogen. Materials with a critical temperature above this threshold are practically important because they can potentially be cooled using liquid nitrogen, which is more accessible and less expensive than liquid helium. Therefore, identifying high-temperature superconductors is relevant not only from a scientific perspective, but also from a practical and economic point of view. 
+The threshold of 77 K was chosen because it is approximately the boiling point of liquid nitrogen. Materials with a critical temperature above this threshold are practically important because they can potentially be cooled using liquid nitrogen, which is more accessible and less expensive than liquid helium. Therefore, identifying high-temperature superconductors is relevant not only from a scientific perspective, but also from a practical and economic point of view.
 
 The goal of this project is to evaluate whether numerical material descriptors can be used to distinguish high-temperature superconductors from other superconducting materials. We compare several classification models and also investigate whether feature-selection methods can reduce the number of predictors while preserving good classification performance.
 
@@ -51,12 +51,11 @@ A secondary hypothesis is that not all available predictors contribute equally t
 
 ## Dataset Description
 
-The dataset used in this project is the **[Superconductivty Data](https://archive.ics.uci.edu/dataset/464/superconductivty+data)** dataset from the UCI Machine Learning Repository. It contains data on **21,263 superconducting materials** and **81 numerical features** extracted from their chemical and physical properties. The dataset is from the field of physics and chemistry and was originally designed for predicting the critical temperature of superconductors.
+The dataset used in this project is the [**Superconductivty Data**](https://archive.ics.uci.edu/dataset/464/superconductivty+data) dataset from the UCI Machine Learning Repository. It contains data on **21,263 superconducting materials** and **81 numerical features** extracted from their chemical and physical properties. The dataset is from the field of physics and chemistry and was originally designed for predicting the critical temperature of superconductors.
 
 Each row represents one superconducting material. The predictors describe statistical properties of elemental attributes such as atomic mass, valence, density, electron affinity, fusion heat and thermal conductivity. According to the UCI description, the file `train.csv` contains 81 extracted features and the critical temperature in the 82nd column. The second file, `unique_m.csv`, contains the corresponding chemical formulas.
 
-In this project, the original continuous target variable `critical_temp` is transformed into a binary classification label. Materials with `critical_temp >= 77 K` are labelled as `high_tc`, while the remaining materials are labelled as `non_high_tc`. 
-# Loading Data
+In this project, the original continuous target variable `critical_temp` is transformed into a binary classification label. Materials with `critical_temp >= 77 K` are labelled as `high_tc`, while the remaining materials are labelled as `non_high_tc`. \# Loading Data
 
 ```{r eda-load-data}
 # Load the original data file.
@@ -784,36 +783,17 @@ RF with the Youden threshold is the recommended model — it achieves the highes
 
 Comparing the features selected by EDA (top 20 by SMD) against the features ranked most important by RF (top 20 by MeanDecreaseGini) reveals an interesting split. Ten features appear in both rankings — these are the most robust predictors, capturing signal that is strong regardless of the method used to detect it: `wtd_std_ThermalConductivity`, `range_ThermalConductivity`, `std_ThermalConductivity`, `range_atomic_radius`, `wtd_mean_Valence`, `wtd_gmean_Valence`, `wtd_entropy_atomic_mass`, `wtd_entropy_Valence`, `wtd_entropy_FusionHeat`, and `wtd_entropy_atomic_radius`. The 10 features unique to RF — such as `wtd_std_Valence`, `wtd_mean_ThermalConductivity`, and `wtd_std_ElectronAffinity` — likely gain importance through interactions with other features that only become visible inside the ensemble. Tthe 10 EDA-only features such as `mean_Valence`, `gmean_Density`, and `range_fie` separate the classes well in isolation but contribute less once the forest already used correlated alternatives. The decision tree, being a single greedy model, selects only the little number of features that provide the best and cleanest split — its top splits typically overlap with the core features mentioned, but it ignores the weaker signals that RF leverages across many trees.
 
-
-In terms of interpretability, the models rank LR > DT > RF > SVM: logistic regression provides coefficients and p-values, decision trees expose the full decision path,
-random forest gives only global feature importance without directional effects, and SVM is a black box.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+In terms of interpretability, the models rank LR \> DT \> RF \> SVM: logistic regression provides coefficients and p-values, decision trees expose the full decision path, random forest gives only global feature importance without directional effects, and SVM is a black box.
 
 ## Scenario 3: Feature Selection Methods
 
-The goal of this scenario is to compare different feature-selection approaches for the same binary classification task. 
-This scenario is motivated by the exploratory data analysis. The EDA showed that several numerical descriptors have strong class-separation ability, but it also revealed substantial redundancy among predictors. In particular, multiple highly ranked features were strongly correlated with each other. This suggests that some predictors may carry overlapping information, which can reduce model interpretability and make feature selection important.
+The goal of this scenario is to compare different feature-selection approaches for the same binary classification task. This scenario is motivated by the exploratory data analysis. The EDA showed that several numerical descriptors have strong class-separation ability, but it also revealed substantial redundancy among predictors. In particular, multiple highly ranked features were strongly correlated with each other. This suggests that some predictors may carry overlapping information, which can reduce model interpretability and make feature selection important.
 
 For this reason, we compare one algorithmic feature-selection method and two embedded regularized methods:
 
-- backward stepwise logistic regression,
-- lasso logistic regression,
-- elastic net logistic regression.
+-   backward stepwise logistic regression,
+-   lasso logistic regression,
+-   elastic net logistic regression.
 
 All methods are applied to the same classification problem and start from the full set of numerical predictors. The aim is not only to compare predictive performance, but also to evaluate how many predictors each method retains and whether a more compact model can be obtained without a substantial loss in performance.
 
@@ -941,7 +921,6 @@ length(backward_features)
 
 The backward stepwise procedure retained 66 predictors from the original set of 81 numerical predictors. This means that the AIC-based algorithm removed 15 predictors, but the final model still remained relatively large. Therefore, backward selection reduced the feature space only moderately. This suggests that many predictors still contributed to the model according to the AIC criterion, but it also means that the resulting model is not very compact and its interpretability remains limited.
 
-
 After selecting the predictors, the final backward logistic regression model was evaluated on the test set. The model outputs predicted probabilities for the `high_tc` class. These probabilities were converted into class labels using two decision thresholds.
 
 First, the default threshold of 0.5 was used. This means that a material was classified as `high_tc` only if the predicted probability was at least 50 %. Second, we also evaluated the Youden threshold derived from the ROC curve. This threshold maximizes the expression sensitivity + specificity - 1 and is useful for analyzing the trade-off between correctly detecting `high_tc` materials and correctly rejecting `non_high_tc` materials.
@@ -1000,6 +979,7 @@ Using the Youden threshold of 0.253 changed the classification trade-off. Sensit
 Overall, backward stepwise logistic regression achieved strong predictive performance, but it retained 66 predictors. Therefore, although it performs well, the model remains relatively complex and its interpretability is limited.
 
 ### Lasso logistic regression
+
 As the first embedded feature-selection method, we used **lasso logistic regression**. Unlike stepwise selection, lasso performs feature selection directly during model training by adding a penalty to the model coefficients. This penalty can shrink some coefficients exactly to zero, which means that the corresponding predictors are effectively removed from the model.
 
 Lasso was selected because the EDA showed strong redundancy and correlation among several predictors. In such a setting, ordinary logistic regression can become difficult to interpret, while lasso can reduce the predictor space automatically and produce a more compact model. This makes it suitable for comparing predictive performance with model interpretability.
@@ -1073,7 +1053,6 @@ Although the predictive performance is strong, the model retained 73 predictors.
 
 Compared with `lambda.min`, this setting is expected to retain fewer predictors, possibly at the cost of slightly lower predictive performance.
 
-
 ```{r task3-lasso-lambda-1se, message=FALSE, warning=FALSE}
 lasso_coef_1se <- coef(cv_lasso, s = "lambda.1se")
 
@@ -1126,7 +1105,6 @@ Using the Youden threshold of 0.296 increased sensitivity from 0.679 to 0.918. T
 
 Overall, lasso with `lambda.1se` provides a better interpretability-performance trade-off than `lambda.min`, but the reduction is still limited. Even with stronger regularization, the model retained many predictors, suggesting that the predictive signal is spread across a larger number of material descriptors rather than concentrated in only a few features.
 
-
 ```{r task3-lasso-summary, message=FALSE, warning=FALSE}
 lasso_summary <- bind_rows(
   lasso_metrics_min %>%
@@ -1157,9 +1135,11 @@ lasso_summary <- bind_rows(
 
 knitr::kable(lasso_summary, digits = 3)
 ```
+
 The summary confirms that `lambda.min` achieves slightly stronger predictive performance, but retains more predictors. The `lambda.1se` setting reduces the number of predictors and keeps a similar AUC, but the model is still relatively large. In both cases, the Youden threshold improves sensitivity and F1-score, which is useful for detecting the minority `high_tc` class.
 
 ### Elastic net logistic regression
+
 As the second embedded feature-selection method, we used **elastic net logistic regression**. Elastic net combines the lasso and ridge penalties. This is useful when predictors are strongly correlated, because pure lasso may select only one variable from a correlated group, while elastic net can keep groups of related predictors together.
 
 This method was selected because the EDA showed strong correlations between several material descriptors. Therefore, elastic net is a suitable alternative to lasso: it still performs regularization and feature selection, but it can be more stable in the presence of correlated predictors.
@@ -1193,12 +1173,13 @@ best_alpha <- enet_cv_results$alpha[[1]]
 
 best_alpha
 ```
-Among the tested alpha values, `alpha = 0.8` achieved the highest cross-validated AUC. This means that the best elastic net model was closer to lasso than to ridge, but still included a ridge component that can help with correlated predictors.
 
+Among the tested alpha values, `alpha = 0.8` achieved the highest cross-validated AUC. This means that the best elastic net model was closer to lasso than to ridge, but still included a ridge component that can help with correlated predictors.
 
 Similarly to lasso, the elastic net model was first evaluated using `lambda.min`. This value corresponds to the regularization strength with the best cross-validated AUC. Therefore, it mainly prioritizes predictive performance rather than model simplicity.
 
 The selected model was evaluated on the test set using both the default threshold of 0.5 and the Youden threshold.
+
 ```{r task3-elastic-net-lambda-min, message=FALSE, warning=FALSE}
 enet_coef_min <- coef(best_enet, s = "lambda.min")
 
@@ -1242,12 +1223,12 @@ enet_metrics_min_youden <- evaluate_classifier(
 
 length(enet_features_min)
 ```
+
 Using `lambda.min`, the elastic net model retained 76 predictors. This means that the model was not sparse, even though regularization was applied. At the default threshold of 0.5, it achieved an accuracy of 0.890, sensitivity of 0.694, specificity of 0.938, F1-score of 0.711 and ROC-AUC of 0.950.
 
 After applying the Youden threshold of 0.292, sensitivity increased from 0.694 to 0.914. This improved the detection of the minority `high_tc` class, but precision decreased from 0.729 to 0.646 and specificity decreased from 0.938 to 0.879. The F1-score increased from 0.711 to 0.757. Therefore, the Youden threshold again provided a better balance between precision and recall, although the model still retained many predictors.
 
 Next, we evaluated the elastic net model with `lambda.1se`. This setting applies a stronger regularization penalty than `lambda.min` and is expected to produce a simpler model. The goal is to check whether elastic net can reduce the number of retained predictors while preserving most of the predictive performance.
-
 
 ```{r task3-elastic-net-lambda-1se, message=FALSE, warning=FALSE}
 enet_coef_1se <- coef(best_enet, s = "lambda.1se")
@@ -1298,7 +1279,6 @@ Using `lambda.1se`, the elastic net model retained 67 predictors, which is fewer
 At the default threshold of 0.5, the model achieved an accuracy of 0.886, sensitivity of 0.679, specificity of 0.937, F1-score of 0.700 and ROC-AUC of 0.948. Compared with `lambda.min`, the model became slightly simpler, but the predictive performance decreased only slightly.
 
 Using the Youden threshold of 0.306 increased sensitivity to 0.913 and improved the F1-score to 0.751. This performance is close to the `lambda.min` version, but with fewer retained predictors. Therefore, `lambda.1se` provides a slightly better interpretability-performance trade-off than `lambda.min`, although the feature reduction is still moderate.
-
 
 ```{r task3-elastic-net-summary, message=FALSE, warning=FALSE}
 enet_summary <- bind_rows(
@@ -1380,6 +1360,7 @@ task3_summary <- bind_rows(
 
 knitr::kable(task3_summary, digits = 3)
 ```
+
 The final comparison shows that all feature-selection methods achieved strong predictive performance, with ROC-AUC values close to or above 0.95 for the less regularized variants. However, the reduction in the number of predictors was only moderate.
 
 Backward stepwise logistic regression retained 66 predictors and achieved the highest AUC among the feature-selection models. With the Youden threshold, it reached sensitivity of 0.929 and F1-score of 0.753. Lasso with `lambda.min` retained more predictors, while lasso with `lambda.1se` reduced the number of retained predictors and preserved similar performance. Elastic net showed a similar pattern, but retained more predictors than lasso, which is expected because elastic net tends to keep correlated groups of variables together.
@@ -1388,10 +1369,8 @@ Across the evaluated methods, the Youden threshold consistently increased sensit
 
 Overall, the best performance-oriented feature-selection model was backward stepwise logistic regression, while lasso with `lambda.1se` provided a better compromise between model compactness and predictive performance. Nevertheless, none of the methods produced a very sparse model, suggesting that the predictive signal is distributed across many material descriptors.
 
-
-
-
 ### Feature retention comparison
+
 Besides comparing predictive performance, we also compared which predictors were retained by the feature-selection methods. This is important because several models retained a relatively large number of predictors, and the overlap between methods can indicate which features are more stable.
 
 For each predictor, we recorded whether it was selected by backward stepwise logistic regression, lasso with `lambda.min`, lasso with `lambda.1se`, elastic net with `lambda.min`, and elastic net with `lambda.1se`. Instead of displaying the full table of all 81 predictors, we summarize the number of retained predictors per method and list the predictors selected by all evaluated feature-selection variants. The full feature-retention table was exported as `task3_feature_retention.csv`.
@@ -1440,7 +1419,6 @@ feature_selection_counts
 
 The number of retained predictors confirms that none of the methods produced a very sparse model. Lasso with `lambda.1se` retained the fewest predictors among the standard evaluated methods, while elastic net retained more predictors, especially under `lambda.min`. This supports the conclusion that the predictive information is spread across many descriptors rather than concentrated in only a small subset of variables.
 
-
 # Final Model Selection
 
 The final model was selected based on predictive performance, class-imbalance handling, and practical usability. Since the `high_tc` class is the minority class, accuracy alone was not used as the main decision criterion. Instead, we focused mainly on ROC-AUC, F1-score, balanced accuracy, sensitivity and the trade-off between sensitivity and specificity.
@@ -1450,7 +1428,6 @@ Across Scenario 1, Random Forest achieved the strongest overall performance. It 
 The feature-selection models from Scenario 3 provided useful insight into predictor redundancy and interpretability. However, they did not outperform Random Forest. Backward stepwise logistic regression achieved strong performance but retained many predictors, which limited interpretability. Lasso with `lambda.1se` provided the best compromise among the feature-selection methods, because it retained fewer predictors while preserving similar performance, but the model was still not highly sparse.
 
 Therefore, the final recommended model for prediction is **Random Forest with the Youden threshold**. It provides the best practical trade-off between detecting `high_tc` materials and limiting false positive predictions.
-
 
 # Conclusion
 
@@ -1468,19 +1445,18 @@ The project submission contains all files required to reproduce the analysis, in
 
 The submitted files include:
 
-- **R Markdown documentation** (`Superconductivity_Classification_Project.Rmd`) containing the full technical report, including data description, EDA, preprocessing, modelling, evaluation, feature selection, final model selection and reproducibility information.
-- **Rendered HTML documentation** generated from the R Markdown file.
-- **One-page executive summary** summarizing the project goal, main findings and final recommendation in non-technical language.
-- **Shiny application** for interactive exploration of the dataset and comparison of selected classification models.
-- **Original dataset files**, including the original superconductivity data used in the project.
-- **Prepared data file** (`prepared_data.RData` or equivalent), created during preprocessing and used to simplify loading in later scripts and in the Shiny application.
-- **R scripts**, including the EDA script (`00_eda.R`) and additional modelling or preparation scripts used to generate intermediate outputs.
-- **Fitted model objects**, stored separately to make the Shiny application load faster without retraining all models every time.
-- **Feature-selection output** (`task3_feature_retention.csv`), containing the retained features and comparison of feature-selection methods.
-
-
+-   **R Markdown documentation** (`Superconductivity_Classification_Project.Rmd`) containing the full technical report, including data description, EDA, preprocessing, modelling, evaluation, feature selection, final model selection and reproducibility information.
+-   **Rendered HTML documentation** generated from the R Markdown file.
+-   **One-page executive summary** summarizing the project goal, main findings and final recommendation in non-technical language.
+-   **Shiny application** for interactive exploration of the dataset and comparison of selected classification models.
+-   **Original dataset files**, including the original superconductivity data used in the project.
+-   **Prepared data file** (`prepared_data.RData` or equivalent), created during preprocessing and used to simplify loading in later scripts and in the Shiny application.
+-   **R scripts**, including the EDA script (`00_eda.R`) and additional modelling or preparation scripts used to generate intermediate outputs.
+-   **Fitted model objects**, stored separately to make the Shiny application load faster without retraining all models every time.
+-   **Feature-selection output** (`task3_feature_retention.csv`), containing the retained features and comparison of feature-selection methods.
 
 # Reproducibility
+
 To improve reproducibility, fixed random seeds were used before train/test splitting and cross-validation. This ensures that the same data split and the same cross-validation folds can be reused when the analysis is rerun. The following session information documents the R version and package versions used to generate this report.
 
 ```{r}
