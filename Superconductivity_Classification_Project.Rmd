@@ -11,6 +11,10 @@ knitr::opts_chunk$set(
   warning = FALSE,
   message = FALSE
 )
+pkgs <- c("e1071", "randomForest", "rpart", "rpart.plot", "MLmetrics",
+          "tidyverse", "patchwork", "pheatmap", "glmnet", "MASS",
+          "caret", "pROC", "magrittr")
+install.packages(pkgs[!(pkgs %in% rownames(installed.packages()))])
 library(e1071)
 library(randomForest)
 library(rpart)

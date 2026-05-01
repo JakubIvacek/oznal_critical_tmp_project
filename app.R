@@ -1,3 +1,8 @@
+pkgs <- c("shiny", "tidyverse", "caret", "pROC", "e1071", "randomForest",
+          "rpart", "rpart.plot", "broom", "MLmetrics", "DT", "ROCit",
+          "glmnet", "MASS")
+install.packages(pkgs[!(pkgs %in% rownames(installed.packages()))])
+
 library(shiny)
 library(tidyverse)
 library(caret)
