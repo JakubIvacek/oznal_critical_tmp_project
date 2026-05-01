@@ -1,5 +1,5 @@
 ---
-title: "Superconductivity_Classification_Project"
+title: "Superconductivity Classification Project"
 author: "Tomáš Tisovský, Jakub Ivácek"
 output: html_document
 date: "2026-05-01"
@@ -366,7 +366,7 @@ lr_a_metrics <- bind_rows(lr_a_metrics_05, lr_a_metrics_youden) %>%
   mutate(model = "LR-A (20 feat)") %>%
   dplyr::select(model, threshold_type, everything())
 
-lr_a_metrics
+knitr::kable(lr_a_metrics, digits = 3)
 ```
 
 ```{r task1-lr-a-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
@@ -422,7 +422,7 @@ lr_b_metrics <- bind_rows(lr_b_metrics_05, lr_b_metrics_youden) %>%
   mutate(model = "LR-B (9 feat)") %>%
   dplyr::select(model, threshold_type, everything())
 
-lr_b_metrics
+knitr::kable(lr_b_metrics, digits = 3)
 ```
 
 ```{r task1-lr-b-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
@@ -451,7 +451,7 @@ lr_comparison <- bind_rows(lr_a_metrics, lr_b_metrics) %>%
   dplyr::select(model, threshold_type, threshold, accuracy, sensitivity,
                 specificity, precision, f1, balanced_acc, auc)
 
-lr_comparison
+knitr::kable(lr_comparison, digits = 3)
 ```
 
 LR-A achieves slightly higher AUC (0.928 vs 0.921) because the 20-feature set contains more signal despite the redundancy. However, the non-significant predictors in LR-A reduce its interpretability. LR-B with the Youden threshold has the highest sensitivity (0.970) and the fewest missed superconductors (24), making it the winner in terms of senstivity. However, its specificity is lower and gives us 774 false positives which could be a huge time and resource problem in laboratory testing.
@@ -497,7 +497,8 @@ svm_a_metrics <- bind_rows(svm_a_metrics_05, svm_a_metrics_youden) %>%
   mutate(model = "SVM-A (20 feat)") %>%
   dplyr::select(model, threshold_type, everything())
 
-svm_a_metrics
+
+knitr::kable(svm_a_metrics, digits = 3)
 ```
 
 ```{r task1-svm-a-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
@@ -554,7 +555,7 @@ svm_b_metrics <- bind_rows(svm_b_metrics_05, svm_b_metrics_youden) %>%
   mutate(model = "SVM-B (9 feat)") %>%
   dplyr::select(model, threshold_type, everything())
 
-svm_b_metrics
+knitr::kable(svm_b_metrics, digits = 3)
 ```
 
 ```{r task1-svm-b-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
@@ -583,7 +584,7 @@ svm_comparison <- bind_rows(svm_a_metrics, svm_b_metrics) %>%
   dplyr::select(model, threshold_type, threshold, accuracy, sensitivity,
                 specificity, precision, f1, balanced_acc, auc)
 
-svm_comparison
+knitr::kable(svm_comparison, digits = 3)
 ```
 
 SVM is the least interpretable model evaluated — the RBF kernel maps data into an implicit high-dimensional space and there are no feature coefficients to check. Unlike LR, where collinearity inflates standard errors, in SVM collinearity distorts the margins geometry directly. SVM-B with 9 deduplicated features therefore slightly outperforms SVM-A in AUC (0.926 vs 0.916) and other metrics, confirming that reducing redundancy benefits margin-based classifiers.
@@ -645,7 +646,7 @@ rf_metrics <- bind_rows(rf_metrics_05, rf_metrics_youden) %>%
   mutate(model = "RF (81 feat)") %>%
   dplyr::select(model, threshold_type, everything())
 
-rf_metrics
+knitr::kable(rf_metrics, digits = 3)
 ```
 
 ```{r task1-rf-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
@@ -729,7 +730,8 @@ dt_metrics <- bind_rows(dt_metrics_05, dt_metrics_youden) %>%
   mutate(model = "DT (81 feat)") %>%
   dplyr::select(model, threshold_type, everything())
 
-dt_metrics
+
+knitr::kable(dt_metrics, digits = 3)
 ```
 
 ```{r task1-dt-cm, message=FALSE, warning=FALSE, fig.width=8, fig.height=3.5}
@@ -763,7 +765,8 @@ task1_summary <- bind_rows(
   dplyr::select(model, threshold_type, accuracy, sensitivity, specificity,
                 f1, balanced_acc, auc, tp, fn, fp)
 
-task1_summary
+
+knitr::kable(task1_summary, digits = 3)
 ```
 
 RF with the Youden threshold is the recommended model — it achieves the highest AUC (0.978), best balanced accuracy, and generates far fewer false positives than LR, making it most practical for laboratory screening. LR-B with the Youden threshold achieves the highest sensitivity (0.970) and fewest missed superconductors (24 false negatives), but this comes at the cost of a very high false positive count (550 more), meaning many unnecessary experiments. For most real-world screening workflows, the we think this trade-off favours RF saving lots of time and resources.
@@ -1046,7 +1049,8 @@ lasso_metrics_min <- bind_rows(
   dplyr::select(lambda_type, threshold_type, everything())
 
 length(lasso_features_min)
-lasso_metrics_min
+
+knitr::kable(lasso_metrics_min, digits = 3)
 ```
 
 Using `lambda.min`, the lasso model retained 73 predictors. This indicates that the selected penalty was relatively weak and did not produce a very sparse model. At the default threshold of 0.5, the model achieved an accuracy of 0.891, sensitivity of 0.698, specificity of 0.937, F1-score of 0.713 and ROC-AUC of 0.950.
@@ -1098,7 +1102,8 @@ lasso_metrics_1se <- bind_rows(
   dplyr::select(lambda_type, threshold_type, everything())
 
 length(lasso_features_1se)
-lasso_metrics_1se
+
+knitr::kable(lasso_metrics_1se, digits = 3)
 ```
 
 Using `lambda.1se`, the lasso model retained 63 predictors, which is fewer than the 73 predictors retained by `lambda.min`. This confirms that the stronger regularization reduced model complexity. However, 63 predictors is still a large number, so the model cannot be considered highly sparse or easily interpretable.
@@ -1137,7 +1142,8 @@ lasso_summary <- bind_rows(
     auc
   )
 
-lasso_summary
+
+knitr::kable(lasso_summary, digits = 3)
 ```
 The summary confirms that `lambda.min` achieves slightly stronger predictive performance, but retains more predictors. The `lambda.1se` setting reduces the number of predictors and keeps a similar AUC, but the model is still relatively large. In both cases, the Youden threshold improves sensitivity and F1-score, which is useful for detecting the minority `high_tc` class.
 
@@ -1307,7 +1313,8 @@ enet_summary <- bind_rows(
     auc
   )
 
-enet_summary
+
+knitr::kable(enet_summary, digits = 3)
 ```
 
 The elastic net summary shows a similar pattern to lasso. The `lambda.min` setting achieved slightly stronger performance but retained more predictors, while `lambda.1se` reduced the number of predictors with only a small decrease in AUC and F1-score. However, even the more regularized elastic net model retained 67 predictors, which suggests that elastic net did not produce a highly sparse model for this dataset.
@@ -1359,7 +1366,7 @@ task3_summary <- bind_rows(
   enet_summary
 )
 
-task3_summary
+knitr::kable(task3_summary, digits = 3)
 ```
 The final comparison shows that all feature-selection methods achieved strong predictive performance, with ROC-AUC values close to or above 0.95 for the less regularized variants. However, the reduction in the number of predictors was only moderate.
 
@@ -1416,7 +1423,7 @@ feature_selection_counts <- feature_retention %>%
   ) %>%
   arrange(retained_features)
 
-knitr::kable(feature_selection_counts, digits = 3)
+feature_selection_counts
 ```
 
 The number of retained predictors confirms that none of the methods produced a very sparse model. Lasso with `lambda.1se` retained the fewest predictors among the standard evaluated methods, while elastic net retained more predictors, especially under `lambda.min`. This supports the conclusion that the predictive information is spread across many descriptors rather than concentrated in only a small subset of variables.
