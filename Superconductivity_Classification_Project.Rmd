@@ -774,7 +774,8 @@ RF with the Youden threshold is the recommended model — it achieves the highes
 Comparing the features selected by EDA (top 20 by SMD) against the features ranked most important by RF (top 20 by MeanDecreaseGini) reveals an interesting split. Ten features appear in both rankings — these are the most robust predictors, capturing signal that is strong regardless of the method used to detect it: `wtd_std_ThermalConductivity`, `range_ThermalConductivity`, `std_ThermalConductivity`, `range_atomic_radius`, `wtd_mean_Valence`, `wtd_gmean_Valence`, `wtd_entropy_atomic_mass`, `wtd_entropy_Valence`, `wtd_entropy_FusionHeat`, and `wtd_entropy_atomic_radius`. The 10 features unique to RF — such as `wtd_std_Valence`, `wtd_mean_ThermalConductivity`, and `wtd_std_ElectronAffinity` — likely gain importance through interactions with other features that only become visible inside the ensemble. Tthe 10 EDA-only features such as `mean_Valence`, `gmean_Density`, and `range_fie` separate the classes well in isolation but contribute less once the forest already used correlated alternatives. The decision tree, being a single greedy model, selects only the little number of features that provide the best and cleanest split — its top splits typically overlap with the core features mentioned, but it ignores the weaker signals that RF leverages across many trees.
 
 
-
+In terms of interpretability, the models rank LR > DT > RF > SVM: logistic regression provides coefficients and p-values, decision trees expose the full decision path,
+random forest gives only global feature importance without directional effects, and SVM is a black box.
 
 
 
