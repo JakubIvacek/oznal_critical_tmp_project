@@ -14,7 +14,7 @@
 # LR-B     9  (dedup)  0.871     0.607        0.935        0.771   311   0.647  0.921
 # SVM-A    20 (EDA)    0.867     0.564        0.940        0.752   345   0.623  0.916
 # SVM-B    9  (dedup)  0.864     0.589        0.930        0.760   325   0.627  0.926
-# RF       81 (all)    0.951<<<  0.877<<<     0.968<<<     0.923<<<  97<<< 0.874<<< 0.980<<<
+# RF       81 (all)    0.951<<<  0.879<<<     0.969<<<     0.924<<<  96<<< 0.875<<< 0.978<<<
 # DT       81 (all)    0.924     0.800        0.954        0.877   158   0.803  0.955
 #
 # Best (0.5): RF wins every metric
@@ -27,15 +27,15 @@
 # LR-B     9  (dedup)  0.804     0.970<<<     0.764        0.867    24<<< 0.658 0.921
 # SVM-A    20 (EDA)    0.828     0.938        0.801        0.870    49   0.680  0.916
 # SVM-B    9  (dedup)  0.836     0.929        0.813        0.871    56   0.688  0.926
-# RF       81 (all)    0.939<<<  0.947        0.937<<<     0.942<<<  42  0.857<<< 0.980<<<
+# RF       81 (all)    0.939<<<  0.953        0.934<<<     0.944<<<  37  0.856<<< 0.978<<<
 # DT       81 (all)    0.902     0.906        0.901        0.904    74   0.784  0.955
 #
 # Best (Youden):
 #   Sensitivity / False Neg : LR-B — highest recall (0.970), fewest missed (24) but lowest specificity so very high 
 #                             false alarm rate which may not be worth it in practice.
-#   Accuracy / Specificity  : RF   —  highest accuracy (0.939) and specificity (0.937), saving 564 false positives compared to LR-B (207 vs 771).
-#                                     Whch might be worth it for less Sensitivity - missing only 18 more HTC superconductors (42 vs 24). For lab
-#                                     validation this is a strong improvement: 564 fewerwasted experiments to catch 18 extra candidates.
+#   Accuracy / Specificity  : RF   —  highest accuracy (0.939) and specificity (0.934), saving 545 false positives compared to LR-B (229 vs 774).
+#                                     Which might be worth it for less Sensitivity - missing only 13 more HTC superconductors (37 vs 24). For lab
+#                                     validation this is a strong improvement: 545 fewer wasted experiments to catch 13 extra candidates.
 #   Balanced Accuracy / F1  : RF   — best joint optimum
 #   AUC                     : RF   — strongest ranking ability (0.980)
 
@@ -49,10 +49,10 @@
 #  
 #   → LR-B Youden is the model with lowest false negatives: Sensitivity 0.970, only 24 missed.
 #     Using reduced 9 features with collinearity removed — all coefficients significant, interpretable and stable.
-#   → RF Youden is the best overall: AUC 0.980, Balanced Acc 0.942, F1 0.857.
-#     Sensitivity 0.947 with only 42 missed — 18 more than LR-B, but saves 564
-#     false positives (207 vs 771). In a lab setting that means 564 fewer wasted
-#     experiments to recover those 18 extra candidates.
+#   → RF Youden is the best overall: AUC 0.978, Balanced Acc 0.944, F1 0.856.
+#     Sensitivity 0.953 with only 37 missed — 13 more than LR-B, but saves 545
+#     false positives (229 vs 774). In a lab setting that means 545 fewer wasted
+#     experiments to recover those 13 extra candidates.
 # 
 #  -So best option is probably RF with Youden threshold even with lower Sensitivity than LR-B.-
 #
