@@ -1418,25 +1418,27 @@ The number of retained predictors confirms that none of the methods produced a v
 
 # Final Model Selection
 
-Based on the results, the final model should be selected according to both performance and interpretability.
+The final model was selected based on predictive performance, class-imbalance handling, and practical usability. Since the `high_tc` class is the minority class, accuracy alone was not used as the main decision criterion. Instead, we focused mainly on ROC-AUC, F1-score, balanced accuracy, sensitivity and the trade-off between sensitivity and specificity.
 
-The selected model should provide a good compromise between classification performance, number of retained features, and explainability.
+Across Scenario 1, Random Forest achieved the strongest overall performance. It reached the highest ROC-AUC and F1-score and provided the best balance between correctly detecting `high_tc` materials and avoiding excessive false positives. With the Youden threshold, Random Forest achieved high sensitivity while still maintaining high specificity, which makes it suitable for practical screening of potentially interesting high-temperature superconductors.
 
-# Limitations
+The feature-selection models from Scenario 3 provided useful insight into predictor redundancy and interpretability. However, they did not outperform Random Forest. Backward stepwise logistic regression achieved strong performance but retained many predictors, which limited interpretability. Lasso with `lambda.1se` provided the best compromise among the feature-selection methods, because it retained fewer predictors while preserving similar performance, but the model was still not highly sparse.
 
-The main limitations of this project are:
+Therefore, the final recommended model for prediction is **Random Forest with the Youden threshold**. It provides the best practical trade-off between detecting `high_tc` materials and limiting false positive predictions.
 
--   the original regression problem was simplified into binary classification,
--   the threshold of 77 K is practically meaningful but still simplifies the target variable,
--   class imbalance may influence model evaluation,
--   correlated predictors can affect feature-selection results,
--   the models identify statistical relationships, not direct physical causality.
 
 # Conclusion
 
-This project compared several classification and feature-selection approaches for identifying high-temperature superconductors. The results show whether regularized models can reduce the number of input features while maintaining good predictive performance.
+This project investigated whether high-temperature superconductors can be identified from numerical material descriptors. The original continuous target `critical_temp` was transformed into a binary classification problem using the 77 K threshold. The exploratory analysis showed that several predictors separate the two classes, but also revealed substantial redundancy and strong correlations among many descriptors.
 
-# 18. Reproducibility
+In Scenario 1, multiple classification models were compared. Random Forest achieved the best overall predictive performance and was selected as the final recommended model. It outperformed logistic regression, SVM and decision tree models, suggesting that non-linear relationships and interactions between descriptors are important for this classification task.
+
+In Scenario 3, feature-selection methods were evaluated to study whether the predictor space could be reduced while preserving performance. Backward stepwise logistic regression, lasso and elastic net all retained a relatively large number of predictors. This indicates that the predictive information is not concentrated in only a small subset of variables, but is distributed across many material descriptors. Among the feature-selection methods, lasso with `lambda.1se` provided the best compromise between model compactness and predictive performance.
+
+Overall, the results support the hypothesis that numerical material descriptors contain useful information for distinguishing `high_tc` and `non_high_tc` materials. Random Forest is the most suitable model for predictive performance, while regularized logistic regression is useful for understanding feature-selection behaviour and predictor stability.
+
+# Reproducibility
+To improve reproducibility, fixed random seeds were used before train/test splitting and cross-validation. This ensures that the same data split and the same cross-validation folds can be reused when the analysis is rerun. The following session information documents the R version and package versions used to generate this report.
 
 ```{r}
 sessionInfo()
