@@ -17,6 +17,10 @@ select <- dplyr::select
 
 
 # ── Load prepared data and fit all models once at startup ─────────────────────
+if (!file.exists("prepared_data.RData")) {
+  message("prepared_data.RData not found — running 00_eda.R to generate it ...")
+  source("00_eda.R")
+}
 load("prepared_data.RData")
 # Provides: train_df, test_df, y_train, y_test,
 #           top20_eda, lr2_features, numeric_predictors, feature_ranking
