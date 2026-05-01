@@ -56,17 +56,17 @@ cat("F1 (Youden):", round(MLmetrics::F1_Score(y_true = y_test, y_pred = class_rf
 
 # ── RF summary (ntree = 300) ──────────────────────────────────────────────────
 # Threshold  Accuracy  Sensitivity  Specificity  Balanced Acc  False Neg   F1    AUC
-#  0.500      0.951     0.879        0.969        0.924          96        0.875  0.978
-#  Youden     0.938     0.953        0.934        0.944          37        0.856  0.978
+#  0.500      0.950     0.879        0.968        0.923          96        0.874  0.979
+#  Youden     0.933     0.954        0.928        0.941          36        0.848  0.979
 #
 # RF (Youden) is the better choice for our use case (superconductor discovery / screening):
-# - Sensitivity 0.953 — catches 95.3% of true high_tc materials, missing only 37
-# - Youden threshold recovers 59 additional true superconductors vs default 0.5 (96 → 37 FN)
-# - Specificity drop (0.969 → 0.934) is acceptable: extra false alarms go to
-#   experimental validation where they are filtered out, but the 59 recovered
+# - Sensitivity 0.954 — catches 95.4% of true high_tc materials, missing only 36
+# - Youden threshold recovers 60 additional true superconductors vs default 0.5 (96 → 36 FN)
+# - Specificity drop (0.968 → 0.928) is acceptable: extra false alarms go to
+#   experimental validation where they are filtered out, but the 60 recovered
 #   candidates would otherwise be permanently missed
-# - AUC unchanged at 0.978 — threshold shift moves the operating point on the ROC curve
-# ---- Balanced Accuracy improves from 0.924 → 0.944 because Youden maximises Sens+Spec together
+# - AUC unchanged at 0.979 — threshold shift moves the operating point on the ROC curve
+# ---- Balanced Accuracy improves from 0.923 → 0.941 because Youden maximises Sens+Spec together
 
 # ── ROC with Youden point ─────────────────────────────────────────────────────
 plot(roc_rf, main = paste0("ROC — Random Forest (AUC = ", round(auc(roc_rf), 3), ")"))
