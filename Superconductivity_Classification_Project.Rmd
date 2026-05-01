@@ -29,15 +29,21 @@ select <- dplyr::select
 
 # Introduction
 
-This project focuses on the classification of superconducting materials. The goal is to predict whether a material belongs to the class of high-temperature superconductors based on its physical and chemical properties.
+This project focuses on the classification of superconducting materials using numerical descriptors derived from their physical and chemical properties. Superconductors are materials that can conduct electricity with zero electrical resistance when cooled below a specific critical temperature. The value of this critical temperature is important because it determines how difficult and expensive it is to cool the material into the superconducting state.
 
-The original target variable is `critical_temp`. For this project, the problem is transformed into a binary classification task. Materials with critical temperature greater than or equal to 77 K are assigned to the class `high_tc`, while the remaining materials are assigned to the class `non_high_tc`.
+The original target variable in the dataset is `critical_temp`, which is continuous. For this project, the problem was transformed into a binary classification task. Materials with `critical_temp >= 77 K` were assigned to the class `high_tc`, while the remaining materials were assigned to the class `non_high_tc`.
 
-# Research Question and Hypothesis
+The threshold of 77 K was chosen because it is approximately the boiling point of liquid nitrogen. Materials with a critical temperature above this threshold are practically important because they can potentially be cooled using liquid nitrogen, which is more accessible and less expensive than liquid helium. Therefore, identifying high-temperature superconductors is relevant not only from a scientific perspective, but also from a practical and economic point of view. 
 
-The main research question is whether high-temperature superconductors can be identified using selected numerical material properties.
+The goal of this project is to evaluate whether numerical material descriptors can be used to distinguish high-temperature superconductors from other superconducting materials. We compare several classification models and also investigate whether feature-selection methods can reduce the number of predictors while preserving good classification performance.
 
-The main hypothesis is that not all available features are equally informative. Therefore, feature selection methods can help identify a smaller and more interpretable subset of variables while preserving good classification performance.
+# Hypothesis
+
+The main research question is whether high-temperature superconductors can be reliably identified from numerical material descriptors without directly using the measured critical temperature as an input feature.
+
+The main hypothesis is that physical and chemical descriptors of materials contain enough information to distinguish `high_tc` superconductors from `non_high_tc` superconductors. We expect that machine learning classifiers can achieve good predictive performance on this binary classification task.
+
+A secondary hypothesis is that not all available predictors contribute equally to the classification. Since the exploratory analysis showed strong correlations and redundancy among several descriptors, we expect that feature-selection methods can reduce the predictor space and improve interpretability while preserving most of the predictive performance.
 
 # Loading Data
 
