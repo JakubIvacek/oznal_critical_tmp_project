@@ -45,6 +45,13 @@ The main hypothesis is that physical and chemical descriptors of materials conta
 
 A secondary hypothesis is that not all available predictors contribute equally to the classification. Since the exploratory analysis showed strong correlations and redundancy among several descriptors, we expect that feature-selection methods can reduce the predictor space and improve interpretability while preserving most of the predictive performance.
 
+## Dataset Description
+
+The dataset used in this project is the **[Superconductivty Data](https://archive.ics.uci.edu/dataset/464/superconductivty+data)** dataset from the UCI Machine Learning Repository. It contains data on **21,263 superconducting materials** and **81 numerical features** extracted from their chemical and physical properties. The dataset is from the field of physics and chemistry and was originally designed for predicting the critical temperature of superconductors.
+
+Each row represents one superconducting material. The predictors describe statistical properties of elemental attributes such as atomic mass, valence, density, electron affinity, fusion heat and thermal conductivity. According to the UCI description, the file `train.csv` contains 81 extracted features and the critical temperature in the 82nd column. The second file, `unique_m.csv`, contains the corresponding chemical formulas.
+
+In this project, the original continuous target variable `critical_temp` is transformed into a binary classification label. Materials with `critical_temp >= 77 K` are labelled as `high_tc`, while the remaining materials are labelled as `non_high_tc`. 
 # Loading Data
 
 ```{r eda-load-data}
@@ -1450,6 +1457,24 @@ In Scenario 1, multiple classification models were compared. Random Forest achie
 In Scenario 3, feature-selection methods were evaluated to study whether the predictor space could be reduced while preserving performance. Backward stepwise logistic regression, lasso and elastic net all retained a relatively large number of predictors. This indicates that the predictive information is not concentrated in only a small subset of variables, but is distributed across many material descriptors. Among the feature-selection methods, lasso with `lambda.1se` provided the best compromise between model compactness and predictive performance.
 
 Overall, the results support the hypothesis that numerical material descriptors contain useful information for distinguishing `high_tc` and `non_high_tc` materials. Random Forest is the most suitable model for predictive performance, while regularized logistic regression is useful for understanding feature-selection behaviour and predictor stability.
+
+# Project Submission Contents
+
+The project submission contains all files required to reproduce the analysis, inspect the results, and run the interactive Shiny application.
+
+The submitted files include:
+
+- **R Markdown documentation** (`Superconductivity_Classification_Project.Rmd`) containing the full technical report, including data description, EDA, preprocessing, modelling, evaluation, feature selection, final model selection and reproducibility information.
+- **Rendered HTML documentation** generated from the R Markdown file.
+- **One-page executive summary** summarizing the project goal, main findings and final recommendation in non-technical language.
+- **Shiny application** for interactive exploration of the dataset and comparison of selected classification models.
+- **Original dataset files**, including the original superconductivity data used in the project.
+- **Prepared data file** (`prepared_data.RData` or equivalent), created during preprocessing and used to simplify loading in later scripts and in the Shiny application.
+- **R scripts**, including the EDA script (`00_eda.R`) and additional modelling or preparation scripts used to generate intermediate outputs.
+- **Fitted model objects**, stored separately to make the Shiny application load faster without retraining all models every time.
+- **Feature-selection output** (`task3_feature_retention.csv`), containing the retained features and comparison of feature-selection methods.
+
+
 
 # Reproducibility
 To improve reproducibility, fixed random seeds were used before train/test splitting and cross-validation. This ensures that the same data split and the same cross-validation folds can be reused when the analysis is rerun. The following session information documents the R version and package versions used to generate this report.
